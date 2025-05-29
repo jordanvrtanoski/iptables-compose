@@ -1,0 +1,73 @@
+# Example iptables configuration
+filter:
+  input: drop
+  output: accept
+  forward: drop
+  mac:
+    - mac-source: "00:11:22:33:44:55"
+      direction: input
+      allow: true
+      interface:
+        input: eth0
+
+ssh:
+  ports:
+    - port: 22
+      allow: true
+
+web:
+  ports:
+    - port: 80
+      allow: true
+      subnet:
+        - "10.1.0.0/24"
+        - "10.2.0.0/24"
+      interface:
+        input: "eth0"
+    - port: 443
+      allow: true
+      subnet:
+        - "10.1.0.0/24"
+        - "10.2.0.0/24"
+    - port: 8080
+      forward: 443
+
+enb:
+  ports:
+    - port: 5000
+      allow: false
+      interface:
+        input: "eth0" 
+      mac-source: "00:11:22:33:44:55"
+
+enb1_mac:
+  mac:
+    - mac-source: "00:11:22:33:44:55"
+      direction: input
+      allow: true
+      interface:
+        input: eth0
+
+enb2_mac:
+  mac:
+    - mac-source: "aa:bb:cc:dd:ee:ff"
+      direction: input
+      allow: true
+      interface:
+        input: eth1
+
+openvpn:
+  ports:
+    - port: 1194
+      protocol: udp
+      allow: true
+
+# Custom section for demonstration
+custom:
+  nat:
+    prerouting:
+      - action: DNAT
+        protocol: tcp
+        port: 8080
+        to_destination: "192.168.1.100:80"
+        comment: "Port forwarding example"

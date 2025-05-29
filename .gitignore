@@ -1,0 +1,178 @@
+# Build directories and artifacts
+build/
+dist/
+out/
+target/
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+Testing/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+iptables-compose-cpp
+test_yaml_parsing
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Kernel Module Compile Results
+*.mod*
+*.cmd
+.tmp_versions/
+modules.order
+Module.symvers
+Mkfile.old
+dkms.conf
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# CLion
+cmake-build-*/
+
+# Qt Creator
+CMakeLists.txt.user
+CMakeLists.txt.user.*
+*.qbs.user
+*.qbs.user.*
+*.moc
+*.moc.cpp
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+*.qmlc
+*.jsc
+Makefile*
+*build-*
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.bak
+
+# OS specific files
+# MacOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msm
+*.msp
+*.lnk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# Package manager
+conan.lock
+conanbuildinfo.*
+conandata.yml
+conanfile.txt.bak
+
+# Rust files (from original implementation reference)
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# Test artifacts
+test_*
+*_test
+*Test
+testing/
+tests/build/
+
+# Backup files
+*.backup
+*.orig
+
+# Core dumps
+core
+core.*
+
+# Profiling data
+*.gcno
+*.gcda
+*.gcov
+gmon.out
+callgrind.out.*
+
+# Documentation build
+docs/build/
+docs/_build/
+
+# Coverage reports
+coverage/
+*.coverage
+htmlcov/
+
+# Dependencies
+third_party/
+vendor/
+deps/
+
+# Local configuration
+.env
+.env.local
+.env.*.local
+config.local.*
+
+# Editor specific
+*.sublime-*
+.editorconfig 
