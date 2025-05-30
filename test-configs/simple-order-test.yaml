@@ -1,0 +1,12 @@
+admin_access:
+  ports:
+    # Block all HTTPS first - this makes the next rule unreachable
+    - port: 443
+      protocol: tcp
+      allow: false
+      
+    # Allow HTTPS from admin network - this will never be reached
+    - port: 443
+      protocol: tcp
+      subnet: ["192.168.100.0/24"]
+      allow: true 

@@ -1,0 +1,89 @@
+global:
+  default_subnet: ["192.168.1.0/24", "10.0.0.0/8"]
+
+# This section demonstrates proper rule ordering
+ssh_access:
+  ports:
+    # Most specific first - single host
+    - port: 22
+      protocol: tcp
+      subnet: ["192.168.100.10/32"]
+      allow: true
+    
+    # Less specific - admin subnet
+    - port: 22
+      protocol: tcp
+      subnet: ["192.168.100.0/24"]
+      allow: true
+    
+    # Most general - block all other SSH
+    - port: 22
+      protocol: tcp
+      allow: false
+
+# This section has problematic ordering that will trigger warnings
+web_services:
+  ports:
+    # PROBLEM: This broad rule will make the next rule unreachable
+    - port: 80
+      protocol: tcp
+      subnet: ["192.168.1.0/24"]
+      allow: false
+    
+    # This specific rule will never be reached
+    - port: 80
+      protocol: tcp
+      subnet: ["192.168.1.50/32"]
+      allow: true
+    
+    # This rule is fine - different port
+    - port: 8080
+      protocol: tcp
+      subnet: ["192.168.1.0/24"]
+      allow: true
+
+# This section demonstrates redundant rules
+database_access:
+  ports:
+    # First rule
+    - port: 3306
+      protocol: tcp
+      subnet: ["10.0.1.0/24"]
+      allow: true
+    
+    # PROBLEM: Redundant rule - same conditions and action
+    - port: 3306
+      protocol: tcp
+      subnet: ["10.0.1.0/24"]
+      allow: true
+    
+    # This is fine - different subnet
+    - port: 3306
+      protocol: tcp
+      subnet: ["10.0.2.0/24"]
+      allow: false
+
+# This section shows cross-protocol rules (should not conflict)
+mixed_protocols:
+  ports:
+    # TCP rule
+    - port: 53
+      protocol: tcp
+      allow: true
+    
+    # UDP rule - no conflict because different protocol
+    - port: 53
+      protocol: udp
+      allow: false
+
+# This section demonstrates MAC rule validation
+device_control:
+  mac:
+    # Specific device from specific subnet
+    - mac-source: "aa:bb:cc:dd:ee:ff"
+      subnet: ["192.168.1.0/24"]
+      allow: true
+    
+    # PROBLEM: Same MAC from broader scope - makes first rule redundant
+    - mac-source: "aa:bb:cc:dd:ee:ff"
+      allow: false 

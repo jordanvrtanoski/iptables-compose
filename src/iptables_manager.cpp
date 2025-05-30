@@ -2,6 +2,7 @@
 #include "config_parser.hpp"
 #include "system_utils.hpp"
 #include "command_executor.hpp"
+#include "rule_validator.hpp"
 #include <iostream>
 #include <sstream>
 #include <algorithm>
@@ -95,6 +96,32 @@ bool IptablesManager::loadConfig(const std::filesystem::path& config_path) {
         
         std::cout << "Configuration loaded successfully" << std::endl;
         
+        // Validate rule order before applying configuration
+        std::cout << "Validating rule order..." << std::endl;
+        auto warnings = RuleValidator::validateRuleOrder(config);
+        
+        if (!warnings.empty()) {
+            std::cout << "Found " << warnings.size() << " potential rule ordering issue(s):" << std::endl;
+            for (const auto& warning : warnings) {
+                switch (warning.type) {
+                    case ValidationWarning::Type::UnreachableRule:
+                        std::cout << "  WARNING (Unreachable Rule): " << warning.message << std::endl;
+                        break;
+                    case ValidationWarning::Type::RedundantRule:
+                        std::cout << "  WARNING (Redundant Rule): " << warning.message << std::endl;
+                        break;
+                    case ValidationWarning::Type::SubnetOverlap:
+                        std::cout << "  WARNING (Subnet Overlap): " << warning.message << std::endl;
+                        break;
+                }
+            }
+            std::cout << "These warnings indicate potential misconfigurations where rules may not work as expected." << std::endl;
+            std::cout << "Consider reordering rules to place more specific conditions before general ones." << std::endl;
+            std::cout << std::endl;
+        } else {
+            std::cout << "Rule order validation passed - no issues detected." << std::endl;
+        }
+        
         // Process filter section if present
         if (config.filter) {
             std::cout << "Processing filter section" << std::endl;
@@ -104,12 +131,12 @@ bool IptablesManager::loadConfig(const std::filesystem::path& config_path) {
             }
         }
         
-        // Process custom sections
+        // Process custom sections in the order they appear in YAML
         std::cout << "Custom sections: " << config.custom_sections.size() << std::endl;
         for (const auto& [section_name, section] : config.custom_sections) {
             std::cout << "Processing section: " << section_name << std::endl;
             
-            // Process port rules
+            // Process port rules in order
             if (section.ports) {
                 for (const auto& port : *section.ports) {
                     if (!processPortConfig(port, section_name)) {
@@ -119,11 +146,21 @@ bool IptablesManager::loadConfig(const std::filesystem::path& config_path) {
                 }
             }
             
-            // Process MAC rules
+            // Process MAC rules in order
             if (section.mac) {
                 for (const auto& mac : *section.mac) {
                     if (!processMacConfig(mac, section_name)) {
                         std::cerr << "Failed to process MAC configuration in section " << section_name << std::endl;
+                        return false;
+                    }
+                }
+            }
+            
+            // Process interface rules in order
+            if (section.interface) {
+                for (const auto& interface : *section.interface) {
+                    if (!processInterfaceConfig(interface, section_name)) {
+                        std::cerr << "Failed to process interface configuration in section " << section_name << std::endl;
                         return false;
                     }
                 }
@@ -245,7 +282,7 @@ bool IptablesManager::processPortConfig(const PortConfig& port, const std::strin
         removeRulesBySignature("nat", "PREROUTING", comment);
         
         // Build iptables command for port forwarding
-        std::vector<std::string> args = {"-t", "nat", "-I", "PREROUTING"};
+        std::vector<std::string> args = {"-t", "nat", "-A", "PREROUTING"};
         
         // Add interface specifications if present
         if (port.interface) {
@@ -307,7 +344,7 @@ bool IptablesManager::processPortConfig(const PortConfig& port, const std::strin
         removeRulesBySignature("filter", chain, comment);
         
         // Build iptables command for regular rule
-        std::vector<std::string> args = {"-I", chain};
+        std::vector<std::string> args = {"-A", chain};
         
         // Add interface specifications if present
         if (port.interface) {
@@ -403,7 +440,7 @@ bool IptablesManager::processMacConfig(const MacConfig& mac, const std::string& 
     removeRulesBySignature("filter", "INPUT", comment);
     
     // Build iptables command for MAC rule
-    std::vector<std::string> args = {"-I", "INPUT"};
+    std::vector<std::string> args = {"-A", "INPUT"};
     
     // Add input interface if specified
     if (mac.interface && mac.interface->input) {
@@ -438,6 +475,68 @@ bool IptablesManager::processMacConfig(const MacConfig& mac, const std::string& 
     auto result = CommandExecutor::executeIptables(args);
     if (!result.isSuccess()) {
         std::cerr << "Failed to add MAC rule: " << result.getErrorMessage() << std::endl;
+        return false;
+    }
+    
+    return true;
+}
+
+bool IptablesManager::processInterfaceConfig(const InterfaceRuleConfig& interface, const std::string& section_name) {
+    std::cout << "Processing interface configuration for section: " << section_name << std::endl;
+    std::cout << "  Direction: " << static_cast<int>(interface.direction) << std::endl;
+    std::cout << "  Allow: " << (interface.allow ? "true" : "false") << std::endl;
+    
+    if (interface.input) {
+        std::cout << "  Input interface: " << *interface.input << std::endl;
+    }
+    if (interface.output) {
+        std::cout << "  Output interface: " << *interface.output << std::endl;
+    }
+    
+    // Generate rule comment
+    std::string iface_comment = "i:" + interface.input.value_or("any") + ":o:" + interface.output.value_or("any");
+    std::string comment = "YAML:" + section_name + ":interface:" + iface_comment;
+    
+    // Convert direction to chain name
+    std::string chain;
+    switch (interface.direction) {
+        case Direction::Input:
+            chain = "INPUT";
+            break;
+        case Direction::Output:
+            chain = "OUTPUT";
+            break;
+        case Direction::Forward:
+            chain = "FORWARD";
+            break;
+    }
+    
+    // Remove existing rules with this signature
+    removeRulesBySignature("filter", chain, comment);
+    
+    // Build iptables command for interface rule
+    std::vector<std::string> args = {"-A", chain};
+    
+    // Add interface specifications if present
+    if (interface.input) {
+        args.push_back("-i");
+        args.push_back(*interface.input);
+    }
+    if (interface.output) {
+        args.push_back("-o");
+        args.push_back(*interface.output);
+    }
+    
+    // Add comment and action
+    args.insert(args.end(), {
+        "-m", "comment",
+        "--comment", comment,
+        "-j", interface.allow ? "ACCEPT" : "DROP"
+    });
+    
+    auto result = CommandExecutor::executeIptables(args);
+    if (!result.isSuccess()) {
+        std::cerr << "Failed to add interface rule: " << result.getErrorMessage() << std::endl;
         return false;
     }
     

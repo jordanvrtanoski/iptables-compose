@@ -1,0 +1,44 @@
+global:
+  default_subnet: ["192.168.1.0/24", "10.0.0.0/8"]
+
+ssh_section:
+  ports:
+    # This rule allows SSH from any IP in 10.0.0.0/8
+    - port: 22
+      protocol: tcp
+      subnet: ["10.0.0.0/8"]
+      allow: true
+    
+    # This rule blocks ALL traffic from 10.0.0.0/8 - will never allow SSH above
+    - port: 22
+      protocol: tcp  
+      subnet: ["10.0.0.0/8"]
+      allow: false
+
+web_services:
+  ports:
+    # This rule blocks traffic from a specific subnet
+    - port: 80
+      protocol: tcp
+      subnet: ["192.168.1.0/24"]
+      allow: false
+    
+    # This rule allows traffic from a more specific host (subset of the above)
+    # This will never be reached because the rule above blocks the entire subnet
+    - port: 80
+      protocol: tcp
+      subnet: ["192.168.1.100/32"]
+      allow: true
+
+admin_access:
+  ports:
+    # Block all HTTPS first - this makes the next rule unreachable
+    - port: 443
+      protocol: tcp
+      allow: false
+      
+    # Allow HTTPS from admin network - this will never be reached
+    - port: 443
+      protocol: tcp
+      subnet: ["192.168.100.0/24"]
+      allow: true 

@@ -24,6 +24,8 @@ This C++ implementation of iptables-compose is **feature-complete** and ready fo
 - [x] **Policy Management** - Chain policy control (INPUT/OUTPUT/FORWARD)
 - [x] **Rule Comments** - Signature-based rule identification for management
 - [x] **Atomic Operations** - Safe rule replacement without conflicts
+- [x] **Rule Order Preservation** - Maintains exact YAML rule ordering in iptables
+- [x] **Rule Validation** - Intelligent analysis to detect unreachable and redundant rules
 
 #### System Integration
 - [x] **Error Handling** - Comprehensive error handling and validation
@@ -60,6 +62,7 @@ Core Components:
 - [x] `./iptables-compose-cpp --remove-rules` - Remove all managed rules
 - [x] `./iptables-compose-cpp --help` - Display help
 - [x] `./iptables-compose-cpp --license` - Show license
+- [x] `./iptables-compose-cpp --debug config.yaml` - Validate configuration without applying
 
 #### Configuration Support
 - [x] Filter section with policy management

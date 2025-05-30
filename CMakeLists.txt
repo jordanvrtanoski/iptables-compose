@@ -22,6 +22,7 @@ add_executable(iptables-compose-cpp
     src/cli_parser.cpp
     src/system_utils.cpp
     src/command_executor.cpp
+    src/rule_validator.cpp
 )
 
 # Include directories

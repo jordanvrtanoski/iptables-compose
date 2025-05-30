@@ -16,6 +16,7 @@ CLIParser::Options CLIParser::parse(int argc, char* argv[]) {
         {"remove-rules", no_argument,       0, 'm'},
         {"license",      no_argument,       0, 'l'},
         {"help",         no_argument,       0, 'h'},
+        {"debug",        no_argument,       0, 'd'},
         {0, 0, 0, 0}
     };
     
@@ -23,7 +24,7 @@ CLIParser::Options CLIParser::parse(int argc, char* argv[]) {
     int c;
     
     // Parse options
-    while ((c = getopt_long(argc, argv, "rmlh", long_options, &option_index)) != -1) {
+    while ((c = getopt_long(argc, argv, "rmlhd", long_options, &option_index)) != -1) {
         switch (c) {
             case 'r':
                 options.reset = true;
@@ -36,6 +37,9 @@ CLIParser::Options CLIParser::parse(int argc, char* argv[]) {
                 break;
             case 'h':
                 options.help = true;
+                break;
+            case 'd':
+                options.debug = true;
                 break;
             case '?':
                 throw std::invalid_argument("Unknown option");
@@ -90,7 +94,8 @@ void CLIParser::printUsage(const std::string& program_name) {
     std::cout << "  -r, --reset        Reset iptables rules before applying config\n";
     std::cout << "  -m, --remove-rules Remove rules with YAML comments\n";
     std::cout << "  -l, --license      Print license information\n";
-    std::cout << "  -h, --help         Show this help message\n\n";
+    std::cout << "  -h, --help         Show this help message\n";
+    std::cout << "  -d, --debug        Debug mode (bypass system validation)\n\n";
     std::cout << "Examples:\n";
     std::cout << "  " << program_name << " config.yaml              Apply configuration\n";
     std::cout << "  " << program_name << " --reset config.yaml      Reset rules then apply config\n";

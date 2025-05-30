@@ -4,6 +4,8 @@
 #include "iptables_manager.hpp"
 #include "cli_parser.hpp"
 #include "system_utils.hpp"
+#include "config_parser.hpp"
+#include "rule_validator.hpp"
 
 int main(int argc, char* argv[]) {
     try {
@@ -24,8 +26,12 @@ int main(int argc, char* argv[]) {
         // For all other operations, validate system requirements
         std::cout << "Validating system requirements..." << std::endl;
         try {
-            iptables::SystemUtils::validateSystemRequirements();
-            std::cout << "System validation passed." << std::endl;
+            if (!options.debug) {
+                iptables::SystemUtils::validateSystemRequirements();
+                std::cout << "System validation passed." << std::endl;
+            } else {
+                std::cout << "Debug mode: Skipping system validation." << std::endl;
+            }
         } catch (const std::runtime_error& e) {
             std::cerr << "\nSystem validation failed. Use --help for usage information." << std::endl;
             return 1;
@@ -63,6 +69,49 @@ int main(int argc, char* argv[]) {
             std::cout << "Processing configuration file: " << config_path.string() << std::endl;
             
             iptables::IptablesManager manager;
+            
+            // In debug mode, just load and validate the configuration without applying rules
+            if (options.debug) {
+                std::cout << "Debug mode: Loading configuration for validation only..." << std::endl;
+                
+                // Load and validate configuration without applying
+                try {
+                    iptables::Config config = iptables::ConfigParser::loadFromFile(config_path.string());
+                    std::cout << "Configuration loaded successfully" << std::endl;
+                    
+                    // Validate rule order
+                    std::cout << "Validating rule order..." << std::endl;
+                    auto warnings = iptables::RuleValidator::validateRuleOrder(config);
+                    
+                    if (!warnings.empty()) {
+                        std::cout << "Found " << warnings.size() << " potential rule ordering issue(s):" << std::endl;
+                        for (const auto& warning : warnings) {
+                            switch (warning.type) {
+                                case iptables::ValidationWarning::Type::UnreachableRule:
+                                    std::cout << "  WARNING (Unreachable Rule): " << warning.message << std::endl;
+                                    break;
+                                case iptables::ValidationWarning::Type::RedundantRule:
+                                    std::cout << "  WARNING (Redundant Rule): " << warning.message << std::endl;
+                                    break;
+                                case iptables::ValidationWarning::Type::SubnetOverlap:
+                                    std::cout << "  WARNING (Subnet Overlap): " << warning.message << std::endl;
+                                    break;
+                            }
+                        }
+                        std::cout << "These warnings indicate potential misconfigurations where rules may not work as expected." << std::endl;
+                        std::cout << "Consider reordering rules to place more specific conditions before general ones." << std::endl;
+                    } else {
+                        std::cout << "Rule order validation passed - no issues detected." << std::endl;
+                    }
+                    
+                    std::cout << "Debug mode: Configuration validation completed. No iptables rules were modified." << std::endl;
+                    return 0;
+                    
+                } catch (const std::exception& e) {
+                    std::cerr << "Failed to load or validate configuration: " << e.what() << std::endl;
+                    return 1;
+                }
+            }
             
             // Handle rule reset before config application
             if (options.reset) {

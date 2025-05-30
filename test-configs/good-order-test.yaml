@@ -1,0 +1,59 @@
+global:
+  default_subnet: ["192.168.1.0/24", "10.0.0.0/8"]
+
+ssh_section:
+  ports:
+    # Allow SSH from specific admin host first (most specific)
+    - port: 22
+      protocol: tcp
+      subnet: ["192.168.100.10/32"]
+      allow: true
+    
+    # Allow SSH from admin network (less specific)
+    - port: 22
+      protocol: tcp
+      subnet: ["192.168.100.0/24"]
+      allow: true
+    
+    # Block SSH from all other sources (most general)
+    - port: 22
+      protocol: tcp
+      allow: false
+
+web_services:
+  ports:
+    # Allow HTTP from specific trusted host first
+    - port: 80
+      protocol: tcp
+      subnet: ["192.168.1.100/32"]
+      allow: true
+    
+    # Block HTTP from rest of local network
+    - port: 80
+      protocol: tcp
+      subnet: ["192.168.1.0/24"]
+      allow: false
+    
+    # Allow HTTP from external networks
+    - port: 80
+      protocol: tcp
+      allow: true
+
+admin_access:
+  ports:
+    # Allow HTTPS from admin network first (more specific)
+    - port: 443
+      protocol: tcp
+      subnet: ["192.168.100.0/24"]
+      allow: true
+      
+    # Block HTTPS from local network
+    - port: 443
+      protocol: tcp
+      subnet: ["192.168.1.0/24"]
+      allow: false
+      
+    # Allow HTTPS from all other sources (most general)
+    - port: 443
+      protocol: tcp
+      allow: true 

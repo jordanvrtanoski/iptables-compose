@@ -86,7 +86,118 @@ The Rust implementation supports:
 - `--remove-rules`: Remove all rules with YAML comments
 - `--license`: Display license information
 
-### 2.4 Special Cases Handling
+### 2.4 Rule Ordering Design
+
+#### 2.4.1 Importance of Rule Order in iptables
+In iptables, rule order is critical because rules are evaluated sequentially from top to bottom within each chain. The first rule that matches a packet determines the action taken. This makes preserving the exact order of rules as they appear in the YAML configuration file essential for correct firewall behavior.
+
+#### 2.4.2 Order Preservation Strategy
+The C++ implementation ensures rule order preservation through the following design choices:
+
+1. **Section Order Preservation**:
+   - Use `std::vector<std::pair<std::string, SectionConfig>>` instead of `std::map` for `custom_sections`
+   - Process sections in the exact order they appear in the YAML file
+   - YAML parsing preserves the natural document order through ordered iteration
+
+2. **Rule Order Within Sections**:
+   - All rule vectors (`ports`, `mac`, `interface`) maintain their order from YAML
+   - Rules are processed sequentially within each section
+   - Use `iptables -A` (append) instead of `-I` (insert) to maintain order
+
+3. **Cross-Section Rule Application**:
+   - Filter section is always processed first (policies and filter-specific MAC rules)
+   - Custom sections are processed in YAML document order
+   - Within each section, rules are applied in this order: ports → mac → interface
+
+#### 2.4.3 iptables Command Strategy
+- **Remove existing rules**: Before adding new rules, remove rules with matching signatures to prevent duplicates
+- **Append rules**: Use `-A` (append) to add rules at the end of chains, preserving order
+- **Line number deletion**: When removing rules, use descending line number order to prevent index shifting
+
+**Example YAML Processing Order**:
+```yaml
+filter:        # 1. Processed first
+  input: drop
+  mac: [...]
+
+ssh:           # 2. Processed second
+  ports: [...]
+
+web:           # 3. Processed third  
+  ports: [...]
+  mac: [...]
+```
+
+This ensures that rules are applied to iptables in the exact sequence they appear in the configuration file.
+
+#### 2.4.4 Safety Considerations for Remote Systems
+
+**Important**: When working on remote systems (VMs, servers accessed via SSH), avoid using `drop` policies in the filter section as they will immediately cut off network access. 
+
+**Safe Examples for Remote Testing**:
+```yaml
+filter:
+  input: accept    # Safe - won't cut SSH connection
+  output: accept   # Safe - allows outgoing traffic
+  forward: accept  # Safe - allows forwarding
+```
+
+**Dangerous Example for Remote Systems**:
+```yaml
+filter:
+  input: drop      # DANGEROUS - will cut SSH connection immediately!
+```
+
+The implementation includes safe example configurations that use `accept` policies to prevent accidental lockouts during development and testing.
+
+#### 2.4.5 Rule Order Validation
+
+To help users identify potential configuration issues, the implementation includes an intelligent rule order validator that analyzes the configuration before applying it to iptables.
+
+**Validation Features**:
+1. **Unreachable Rule Detection**: Identifies rules that will never be executed because earlier rules with broader conditions overshadow them
+2. **Redundant Rule Detection**: Finds rules that have the same effect as earlier rules
+3. **Subnet Overlap Analysis**: Detects when subnet specifications create rule conflicts
+
+**Validation Logic**:
+The validator analyzes rule selectivity by examining:
+- **Subnet specificity**: More specific subnets (e.g., `/32`) vs. broader subnets (e.g., `/24`) or no subnet restriction
+- **Port specificity**: Specific ports vs. no port restriction
+- **Protocol matching**: TCP vs. UDP rules
+- **Interface restrictions**: Specific interfaces vs. any interface
+- **MAC address filtering**: Specific MAC addresses vs. no MAC restriction
+
+**Example Problematic Configurations**:
+```yaml
+# PROBLEM: Second rule will never be reached
+web_section:
+  ports:
+    - port: 80
+      protocol: tcp
+      subnet: ["192.168.1.0/24"]  # Broader subnet
+      allow: false
+    - port: 80
+      protocol: tcp
+      subnet: ["192.168.1.100/32"] # More specific subnet - unreachable!
+      allow: true
+```
+
+**Validation Output**:
+```
+Found 1 potential rule ordering issue(s):
+  WARNING (Unreachable Rule): Rule will never be executed: port 80 (TCP) from subnets: 192.168.1.100/32 -> ACCEPT in section 'web_section' (rule #2) is overshadowed by port 80 (TCP) from subnets: 192.168.1.0/24 -> DROP in section 'web_section' (rule #1)
+```
+
+**Implementation Components**:
+- `RuleValidator` class with static validation methods
+- `ValidationWarning` struct to represent detected issues
+- `RuleSelectivity` struct to analyze rule characteristics
+- Integration into the main configuration loading process
+- Debug mode (`--debug`) for testing validation without applying rules
+
+The validator helps prevent common iptables configuration mistakes and ensures that rules work as intended by the administrator.
+
+### 2.5 Special Cases Handling
 
 1. **Port Forwarding**: Uses NAT table PREROUTING chain with REDIRECT target
 2. **MAC Rules**: Only allowed in INPUT direction
@@ -172,14 +283,19 @@ struct Config {
 };
 ```
 
-#### 3.1.3 Enhanced ConfigParser
-**Files to modify**: `include/config_parser.hpp`, `src/config_parser.cpp`
-
-**Requirements**:
-- Parse YAML into Config structures
-- Handle nested configurations
-- Provide detailed error messages
-- Support custom section parsing
+#### 3.1.3 Configuration Data Structures
+- [x] Create `include/config.hpp` header file
+- [x] Define `PortConfig` struct with all required fields
+- [x] Define `MacConfig` struct with all required fields
+- [x] Define `FilterConfig` struct with all required fields
+- [x] Define `SectionConfig` struct with all required fields
+- [x] Define `Config` root struct with all required fields
+- [x] Add validation methods for each config type
+- [x] Add YAML serialization support using yaml-cpp
+- [x] Complete YAML template specializations for all config types
+- [x] Support for optional fields using std::optional
+- [x] Integration with existing rule system enums and types
+- [x] **Rule order preservation using ordered containers**
 
 ### 3.2 Phase 2: Rule System Enhancement
 
@@ -373,6 +489,7 @@ int main(int argc, char* argv[]) {
 1. **High Priority** (Core functionality):
    - CLI argument parsing
    - Configuration structures and parsing
+   - **Rule order preservation** (sections and within sections)
    - Basic rule processing
    - Command execution
 
@@ -448,6 +565,7 @@ No major changes required to CMakeLists.txt, but may need:
 - [x] Complete YAML template specializations for all config types
 - [x] Support for optional fields using std::optional
 - [x] Integration with existing rule system enums and types
+- [x] **Rule order preservation using ordered containers**
 
 ### 4.2 Core Infrastructure (Phase 1 continued)
 
@@ -545,7 +663,7 @@ No major changes required to CMakeLists.txt, but may need:
 - [ ] Implement `getRulesByComment()` method
 - [ ] Implement `getRulesByDirection()` method
 - [ ] Complete `executeIptablesCommand()` implementation
-- [ ] Complete `getRuleLineNumbers()` implementation
+- [x] Complete `getRuleLineNumbers()` implementation
 - [ ] Implement `removeRulesBySignature()` method
 - [ ] Implement `removeAllYamlRules()` method
 - [ ] Implement `resetAllPolicies()` method
@@ -780,12 +898,14 @@ This implementation plan ensures a systematic approach to porting the Rust funct
 - Configuration validation methods are implemented
 - Support for optional fields using std::optional is working
 - Integration with existing rule system enums and types is complete
+- **Rule order preservation using ordered containers is implemented and tested**
 
 **✅ Configuration Parser**
 - YAML parsing for all configuration types is working
 - File and string-based configuration loading is functional
 - Error handling and validation are comprehensive
 - Integration with yaml-cpp library is complete
+- **Section order preservation from YAML is working correctly**
 
 **✅ System Utilities & Command Execution**
 - System requirements validation (root privileges, iptables availability)
@@ -800,6 +920,14 @@ This implementation plan ensures a systematic approach to porting the Rust funct
 - Integration with all CLI options and system validation
 - Comprehensive status reporting and error messages
 
+**✅ Rule Order Preservation (CRITICAL FEATURE)**
+- Sections are processed in exact YAML document order
+- Rules within sections maintain their order (ports → mac → interface)
+- Individual rules within each type preserve their sequence
+- Uses `std::vector<std::pair<std::string, SectionConfig>>` for ordered sections
+- Uses `-A` (append) instead of `-I` (insert) for iptables commands
+- **Verified through live testing: rules appear in iptables in correct order**
+
 ### 5.2 Verified Functionality Through sudo Testing
 
 **✅ Successful Operations Tested:**
@@ -808,6 +936,7 @@ This implementation plan ensures a systematic approach to porting the Rust funct
 - `sudo ./build/iptables-compose-cpp example.yaml` - processes configuration successfully
 - `sudo ./build/iptables-compose-cpp --remove-rules` - removes YAML rules successfully  
 - `sudo ./build/iptables-compose-cpp --reset example.yaml` - resets and applies config successfully
+- **Rule order preservation testing** - verified that iptables rules appear in exact YAML order
 
 **✅ Configuration Processing Verified:**
 - Filter section processing (policies and MAC rules)
@@ -816,6 +945,8 @@ This implementation plan ensures a systematic approach to porting the Rust funct
 - MAC configuration with direction and interface validation
 - Port forwarding configuration parsing
 - Complex YAML structure parsing with nested configurations
+- **Section order preservation**: first_section → second_section → third_section
+- **Rule order within sections**: ports first, then MAC rules, in document order
 
 ### 5.3 Phase 4.1 Implementation Status Summary
 

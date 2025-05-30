@@ -14,6 +14,7 @@ public:
         bool remove_rules = false;
         bool show_license = false;
         bool help = false;
+        bool debug = false;  // Bypass system validation for testing
     };
     
     static Options parse(int argc, char* argv[]);

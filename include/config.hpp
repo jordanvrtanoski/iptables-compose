@@ -54,10 +54,23 @@ struct FilterConfig {
     std::string getErrorMessage() const;
 };
 
+// Interface rule configuration (new structure for standalone interface rules)
+struct InterfaceRuleConfig {
+    std::optional<std::string> input;
+    std::optional<std::string> output;
+    Direction direction = Direction::Input;
+    bool allow = true;
+
+    bool isValid() const;
+    std::string getErrorMessage() const;
+};
+
 // Section configuration matching Rust SectionConfig
+// Note: Order of rules within each vector is preserved from YAML
 struct SectionConfig {
     std::optional<std::vector<PortConfig>> ports;
     std::optional<std::vector<MacConfig>> mac;
+    std::optional<std::vector<InterfaceRuleConfig>> interface;
 
     bool isValid() const;
     std::string getErrorMessage() const;
@@ -66,7 +79,8 @@ struct SectionConfig {
 // Root configuration matching Rust Config
 struct Config {
     std::optional<FilterConfig> filter;
-    std::map<std::string, SectionConfig> custom_sections;
+    // Use vector of pairs to preserve the order of sections as they appear in YAML
+    std::vector<std::pair<std::string, SectionConfig>> custom_sections;
 
     bool isValid() const;
     std::string getErrorMessage() const;
@@ -111,6 +125,12 @@ template<>
 struct convert<iptables::MacConfig> {
     static Node encode(const iptables::MacConfig& config);
     static bool decode(const Node& node, iptables::MacConfig& config);
+};
+
+template<>
+struct convert<iptables::InterfaceRuleConfig> {
+    static Node encode(const iptables::InterfaceRuleConfig& config);
+    static bool decode(const Node& node, iptables::InterfaceRuleConfig& config);
 };
 
 template<>

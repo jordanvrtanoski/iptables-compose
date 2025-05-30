@@ -1,0 +1,19 @@
+# Example iptables configuration
+ssh:
+  ports:
+    - port: 22
+      allow: true
+
+
+enb2_mac:
+  mac:
+    - mac-source: "aa:bb:cc:dd:ee:ff"
+      direction: input
+      allow: true
+      interface:
+        input: eth1
+
+  interface:
+    - allow: false
+      input: eth1
+

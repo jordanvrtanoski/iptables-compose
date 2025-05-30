@@ -44,6 +44,19 @@ std::string MacConfig::getErrorMessage() const {
     return "";
 }
 
+// InterfaceRuleConfig implementation
+bool InterfaceRuleConfig::isValid() const {
+    // At least one interface should be specified
+    return input.has_value() || output.has_value();
+}
+
+std::string InterfaceRuleConfig::getErrorMessage() const {
+    if (!input.has_value() && !output.has_value()) {
+        return "At least one interface (input or output) must be specified";
+    }
+    return "";
+}
+
 // FilterConfig implementation
 bool FilterConfig::isValid() const {
     if (mac) {
@@ -84,6 +97,13 @@ bool SectionConfig::isValid() const {
             }
         }
     }
+    if (interface) {
+        for (const auto& interface_rule : *interface) {
+            if (!interface_rule.isValid()) {
+                return false;
+            }
+        }
+    }
     return true;
 }
 
@@ -99,6 +119,14 @@ std::string SectionConfig::getErrorMessage() const {
     if (mac) {
         for (const auto& mac_rule : *mac) {
             std::string error = mac_rule.getErrorMessage();
+            if (!error.empty()) {
+                return error;
+            }
+        }
+    }
+    if (interface) {
+        for (const auto& interface_rule : *interface) {
+            std::string error = interface_rule.getErrorMessage();
             if (!error.empty()) {
                 return error;
             }
@@ -369,6 +397,47 @@ bool convert<MacConfig>::decode(const Node& node, MacConfig& config) {
     return true;
 }
 
+// InterfaceRuleConfig conversion
+YAML::Node convert<InterfaceRuleConfig>::encode(const InterfaceRuleConfig& config) {
+    Node node;
+    
+    if (config.input) {
+        node["input"] = *config.input;
+    }
+    if (config.output) {
+        node["output"] = *config.output;
+    }
+    if (config.direction != Direction::Input) {
+        node["direction"] = config.direction;
+    }
+    if (!config.allow) {
+        node["allow"] = config.allow;
+    }
+    
+    return node;
+}
+
+bool convert<InterfaceRuleConfig>::decode(const Node& node, InterfaceRuleConfig& config) {
+    if (!node.IsMap()) return false;
+    
+    if (node["input"]) {
+        config.input = node["input"].as<std::string>();
+    }
+    if (node["output"]) {
+        config.output = node["output"].as<std::string>();
+    }
+    if (node["direction"]) {
+        config.direction = node["direction"].as<Direction>();
+    }
+    if (node["allow"]) {
+        config.allow = node["allow"].as<bool>();
+    } else {
+        config.allow = true; // default value
+    }
+    
+    return true;
+}
+
 // FilterConfig conversion
 YAML::Node convert<FilterConfig>::encode(const FilterConfig& config) {
     Node node;
@@ -418,6 +487,9 @@ YAML::Node convert<SectionConfig>::encode(const SectionConfig& config) {
     if (config.mac) {
         node["mac"] = *config.mac;
     }
+    if (config.interface) {
+        node["interface"] = *config.interface;
+    }
     
     return node;
 }
@@ -431,6 +503,9 @@ bool convert<SectionConfig>::decode(const Node& node, SectionConfig& config) {
     if (node["mac"]) {
         config.mac = node["mac"].as<std::vector<MacConfig>>();
     }
+    if (node["interface"]) {
+        config.interface = node["interface"].as<std::vector<InterfaceRuleConfig>>();
+    }
     
     return true;
 }
@@ -443,6 +518,7 @@ YAML::Node convert<Config>::encode(const Config& config) {
         node["filter"] = *config.filter;
     }
     
+    // Preserve order of custom sections by iterating in the same order
     for (const auto& [name, section] : config.custom_sections) {
         node[name] = section;
     }
@@ -457,11 +533,16 @@ bool convert<Config>::decode(const Node& node, Config& config) {
         config.filter = node["filter"].as<FilterConfig>();
     }
     
-    // Parse all other sections as custom sections
+    // Preserve the order of sections as they appear in YAML
+    // Clear any existing custom sections first
+    config.custom_sections.clear();
+    
+    // Iterate through the YAML node in order and add non-filter sections
     for (const auto& item : node) {
         std::string key = item.first.as<std::string>();
         if (key != "filter") {
-            config.custom_sections[key] = item.second.as<SectionConfig>();
+            SectionConfig section = item.second.as<SectionConfig>();
+            config.custom_sections.emplace_back(key, std::move(section));
         }
     }
     
