@@ -667,23 +667,103 @@ bool IptablesManager::resetPolicies() {
 
 // Helper methods
 Direction IptablesManager::parseDirection(const std::string& direction) {
-    // TODO: Implement direction parsing
-    return Direction::Input;
+    std::string lower_dir = direction;
+    std::transform(lower_dir.begin(), lower_dir.end(), lower_dir.begin(), ::tolower);
+    
+    if (lower_dir == "input" || lower_dir == "in") {
+        return Direction::Input;
+    } else if (lower_dir == "output" || lower_dir == "out") {
+        return Direction::Output;
+    } else if (lower_dir == "forward" || lower_dir == "fwd") {
+        return Direction::Forward;
+    } else {
+        // Default to Input if unknown
+        std::cerr << "Warning: Unknown direction '" << direction << "', defaulting to Input" << std::endl;
+        return Direction::Input;
+    }
 }
 
 Action IptablesManager::parseAction(const std::string& action) {
-    // TODO: Implement action parsing
-    return Action::Accept;
+    std::string lower_action = action;
+    std::transform(lower_action.begin(), lower_action.end(), lower_action.begin(), ::tolower);
+    
+    if (lower_action == "accept" || lower_action == "allow") {
+        return Action::Accept;
+    } else if (lower_action == "drop" || lower_action == "deny") {
+        return Action::Drop;
+    } else if (lower_action == "reject") {
+        return Action::Reject;
+    } else {
+        // Default to Accept if unknown
+        std::cerr << "Warning: Unknown action '" << action << "', defaulting to Accept" << std::endl;
+        return Action::Accept;
+    }
 }
 
 Protocol IptablesManager::parseProtocol(const std::string& protocol) {
-    // TODO: Implement protocol parsing
-    return Protocol::Tcp;
+    std::string lower_protocol = protocol;
+    std::transform(lower_protocol.begin(), lower_protocol.end(), lower_protocol.begin(), ::tolower);
+    
+    if (lower_protocol == "tcp") {
+        return Protocol::Tcp;
+    } else if (lower_protocol == "udp") {
+        return Protocol::Udp;
+    } else {
+        // Default to TCP if unknown
+        std::cerr << "Warning: Unknown protocol '" << protocol << "', defaulting to TCP" << std::endl;
+        return Protocol::Tcp;
+    }
 }
 
 InterfaceConfig IptablesManager::parseInterface(const YAML::Node& node) {
-    // TODO: Implement interface parsing
-    return InterfaceConfig{};
+    InterfaceConfig config;
+    
+    if (!node) {
+        return config; // Return empty interface config
+    }
+    
+    try {
+        // Handle different YAML node types
+        if (node.IsScalar()) {
+            // Single interface string - treat as input interface
+            std::string interface = node.as<std::string>();
+            if (!interface.empty() && interface != "any") {
+                config.input = interface;
+            }
+        } else if (node.IsMap()) {
+            // Interface object with input/output fields
+            if (node["input"]) {
+                std::string input_iface = node["input"].as<std::string>();
+                if (!input_iface.empty() && input_iface != "any") {
+                    config.input = input_iface;
+                }
+            }
+            if (node["output"]) {
+                std::string output_iface = node["output"].as<std::string>();
+                if (!output_iface.empty() && output_iface != "any") {
+                    config.output = output_iface;
+                }
+            }
+            
+            // Handle legacy "in" and "out" field names for compatibility
+            if (node["in"]) {
+                std::string input_iface = node["in"].as<std::string>();
+                if (!input_iface.empty() && input_iface != "any") {
+                    config.input = input_iface;
+                }
+            }
+            if (node["out"]) {
+                std::string output_iface = node["out"].as<std::string>();
+                if (!output_iface.empty() && output_iface != "any") {
+                    config.output = output_iface;
+                }
+            }
+        }
+    } catch (const YAML::Exception& e) {
+        std::cerr << "Warning: Failed to parse interface configuration: " << e.what() << std::endl;
+    }
+    
+    return config;
 }
 
 } // namespace iptables 

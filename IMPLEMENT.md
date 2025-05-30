@@ -655,20 +655,31 @@ No major changes required to CMakeLists.txt, but may need:
 - [x] `addRule()` method implementation
 - [x] `clearRules()` method implementation
 - [x] `getAllRules()` method implementation
-- [ ] Complete `removeRule()` implementation
-- [ ] Complete `applyRules()` implementation  
-- [ ] Complete `removeAllRules()` implementation
-- [ ] Complete `setPolicy()` implementation
-- [ ] Complete `resetPolicies()` implementation
-- [ ] Implement `getRulesByComment()` method
-- [ ] Implement `getRulesByDirection()` method
-- [ ] Complete `executeIptablesCommand()` implementation
+- [x] Complete `removeRule()` implementation
+- [x] Complete `applyRules()` implementation  
+- [x] Complete `removeAllRules()` implementation
+- [x] Complete `setPolicy()` implementation
+- [x] Complete `resetPolicies()` implementation
+- [x] Implement `getRulesByComment()` method
+- [x] Implement `getRulesByDirection()` method
+- [x] Complete `executeIptablesCommand()` implementation
 - [x] Complete `getRuleLineNumbers()` implementation
-- [ ] Implement `removeRulesBySignature()` method
-- [ ] Implement `removeAllYamlRules()` method
-- [ ] Implement `resetAllPolicies()` method
-- [ ] Add support for multiple iptables tables
-- [ ] Add line number based deletion logic
+- [x] Implement `removeRulesBySignature()` method
+- [x] Implement `removeAllYamlRules()` method
+- [x] Implement `resetAllPolicies()` method
+- [x] Add support for multiple iptables tables
+- [x] Add line number based deletion logic
+
+**Implementation Details:**
+- **Rule Management**: Complete implementations for adding, removing, and clearing rules with proper memory management
+- **Rule Application**: Full iptables command execution through CommandExecutor with comprehensive error handling
+- **Policy Management**: Support for setting and resetting chain policies (INPUT/OUTPUT/FORWARD) in filter table
+- **Rule Querying**: Filtering rules by comment patterns and direction with efficient search algorithms
+- **YAML Rule Management**: Signature-based rule identification and removal matching Rust implementation patterns
+- **Multi-table Support**: Operations across filter, nat, and mangle tables with proper chain validation
+- **Line Number Deletion**: Descending order deletion to prevent index shifting during rule removal
+- **Comment Parsing**: Regex-based parsing of iptables output to extract line numbers for targeted rule removal
+- **Error Handling**: Comprehensive error reporting with detailed failure messages for all operations
 
 #### 4.4.2 Enhanced IptablesManager
 - [x] Basic `IptablesManager` class structure
@@ -682,13 +693,23 @@ No major changes required to CMakeLists.txt, but may need:
 - [x] SystemUtils integration for validation
 - [x] Comprehensive error handling
 - [x] Integration with main application workflow
-- [ ] Complete `parseDirection()` implementation
-- [ ] Complete `parseAction()` implementation  
-- [ ] Complete `parseProtocol()` implementation
-- [ ] Complete `parseInterface()` implementation
+- [x] Complete `parseDirection()` implementation
+- [x] Complete `parseAction()` implementation  
+- [x] Complete `parseProtocol()` implementation
+- [x] Complete `parseInterface()` implementation
 - [x] Implement rule replacement logic (remove then add)
 - [x] Add actual iptables command generation and execution
 - [x] Add CommandExecutor integration (fully implemented)
+
+**Implementation Details:**
+- **Helper Method Parsing**: Complete string-to-enum conversions with case-insensitive matching and comprehensive fallback handling
+- **Direction Parsing**: Supports standard names (input/output/forward) and shorthand aliases (in/out/fwd) with Input as safe default
+- **Action Parsing**: Supports multiple action names (accept/allow, drop/deny, reject) with Accept as safe default
+- **Protocol Parsing**: Case-insensitive TCP/UDP parsing with TCP as default for unknown protocols
+- **Interface YAML Parsing**: Flexible interface configuration supporting both scalar strings and object notation with input/output fields
+- **Legacy Compatibility**: Support for both modern (input/output) and legacy (in/out) field names in YAML interface specifications
+- **Error Handling**: Graceful fallback to safe defaults with warning messages for invalid configuration values
+- **YAML Exception Safety**: Proper YAML::Exception handling in interface parsing with detailed error reporting
 
 ### 4.5 Main Application Logic (Phase 4)
 
