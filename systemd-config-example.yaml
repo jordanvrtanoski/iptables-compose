@@ -1,0 +1,85 @@
+# Example iptables-compose configuration for systemd deployment
+# Location: /etc/network/iptables-compose.yaml
+#
+# This configuration provides a secure baseline firewall setup
+# suitable for production servers
+
+# Default policies for each chain
+filter:
+  input: drop      # Drop all incoming traffic by default
+  output: accept   # Allow all outgoing traffic
+  forward: drop    # Drop forwarded traffic (for non-router systems)
+
+# SSH access (essential for remote management)
+ssh:
+  ports:
+    - port: 22
+      protocol: tcp
+      direction: input
+      allow: true
+      comment: "SSH remote access"
+
+# HTTP/HTTPS web services
+web:
+  ports:
+    - port: 80
+      protocol: tcp
+      direction: input
+      allow: true
+      comment: "HTTP web traffic"
+    - port: 443
+      protocol: tcp
+      direction: input
+      allow: true
+      comment: "HTTPS web traffic"
+
+# DNS resolution (outbound)
+dns:
+  ports:
+    - port: 53
+      protocol: udp
+      direction: output
+      allow: true
+      comment: "DNS queries"
+    - port: 53
+      protocol: tcp
+      direction: output
+      allow: true
+      comment: "DNS queries (TCP)"
+
+# NTP time synchronization
+ntp:
+  ports:
+    - port: 123
+      protocol: udp
+      direction: output
+      allow: true
+      comment: "NTP time sync"
+
+# System monitoring (if using monitoring agents)
+monitoring:
+  ports:
+    - port: 9100
+      protocol: tcp
+      direction: input
+      allow: true
+      sources: ["10.0.0.0/8", "192.168.0.0/16"]
+      comment: "Prometheus node exporter (internal networks only)"
+
+# Database access (example for PostgreSQL)
+database:
+  ports:
+    - port: 5432
+      protocol: tcp
+      direction: input
+      allow: true
+      sources: ["10.0.1.0/24"]
+      comment: "PostgreSQL database (app servers only)"
+
+# ICMP for basic network diagnostics
+icmp:
+  ports:
+    - protocol: icmp
+      direction: input
+      allow: true
+      comment: "ICMP ping responses" 

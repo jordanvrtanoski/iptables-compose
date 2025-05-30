@@ -113,6 +113,52 @@ ssh:
       subnet: ["192.168.1.0/24"]  # Only allow from local network
 ```
 
+## 🔧 SystemD Deployment
+
+For production environments, `iptables-compose-cpp` can be deployed as a systemd service to automatically apply firewall rules at system startup with proper network timing dependencies.
+
+### Quick SystemD Setup
+
+1. **Install the service** (after building and installing the binary):
+   ```bash
+   sudo ./install-systemd-service.sh
+   ```
+
+2. **Configure your firewall** at `/etc/network/iptables-compose.yaml`:
+   ```bash
+   sudo cp systemd-config-example.yaml /etc/network/iptables-compose.yaml
+   sudo nano /etc/network/iptables-compose.yaml  # Edit as needed
+   ```
+
+3. **Enable and start the service**:
+   ```bash
+   sudo systemctl enable iptables-compose.service
+   sudo systemctl start iptables-compose.service
+   ```
+
+### Key SystemD Features
+
+- **🚀 Automatic Startup**: Rules applied automatically after network interfaces are ready
+- **⏰ Proper Timing**: Runs after network setup, before SSH and other services
+- **🔒 Security Hardened**: Service runs with minimal required privileges
+- **📊 Monitoring**: Full integration with systemd journal for logging
+- **🔄 Reload Support**: Configuration changes via `systemctl reload`
+
+### Service Management
+
+```bash
+# Check service status
+sudo systemctl status iptables-compose.service
+
+# View service logs
+sudo journalctl -u iptables-compose.service
+
+# Reload configuration
+sudo systemctl reload iptables-compose.service
+```
+
+**📖 For detailed deployment instructions, troubleshooting, and production best practices, see [SYSTEMD_DEPLOYMENT.md](SYSTEMD_DEPLOYMENT.md)**
+
 ## 📁 Project Structure
 
 ```

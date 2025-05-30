@@ -1,0 +1,36 @@
+[Unit]
+Description=iptables-compose firewall configuration
+Documentation=man:iptables-compose-cpp(8)
+After=network.target network-online.target systemd-networkd.service NetworkManager.service
+Wants=network-online.target
+Before=sshd.service
+ConditionPathExists=/etc/network/iptables-compose.yaml
+ConditionPathExists=/usr/sbin/iptables-compose-cpp
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/iptables-compose-cpp /etc/network/iptables-compose.yaml
+ExecReload=/usr/sbin/iptables-compose-cpp --reset /etc/network/iptables-compose.yaml
+User=root
+Group=root
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=30
+RemainAfterExit=yes
+
+# Security hardening
+NoNewPrivileges=false
+ProtectSystem=false
+ProtectHome=true
+ProtectKernelTunables=false
+ProtectKernelModules=false
+ProtectControlGroups=false
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+RestrictNamespaces=true
+SystemCallFilter=@system-service @network-io @file-system
+
+[Install]
+WantedBy=multi-user.target 
