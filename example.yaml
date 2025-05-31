@@ -47,21 +47,27 @@ enb:
         input: "eth0" 
       mac-source: "00:11:22:33:44:55"
 
-enb1_mac:
-  mac:
-    - mac-source: "00:11:22:33:44:55"
-      direction: input
-      allow: true
-      interface:
-        input: eth0
+mac_filter:
+  interface:
+    input: "eth1"
+    chain: mac_rules_eth1
 
-enb2_mac:
-  mac:
-    - mac-source: "aa:bb:cc:dd:ee:ff"
-      direction: input
-      allow: true
-      interface:
-        input: eth1
+mac_rules_eth1:
+  chain:
+    - name: "MAC_RULES_ETH1"
+      action: accept
+      rules:
+        enb1_mac:
+          mac:
+            - mac-source: "00:11:22:33:44:55"
+              direction: input
+              allow: true
+
+        enb2_mac:
+          mac:
+            - mac-source: "aa:bb:cc:dd:ee:ff"
+              direction: input
+              allow: true
 
 openvpn:
   ports:

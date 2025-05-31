@@ -9,6 +9,11 @@
 
 namespace iptables {
 
+// Constructor
+IptablesManager::IptablesManager() 
+    : chain_manager_(command_executor_) {
+}
+
 // Helper function to convert Policy enum to string
 std::string policyToString(Policy policy) {
     switch (policy) {
@@ -136,6 +141,24 @@ bool IptablesManager::loadConfig(const std::filesystem::path& config_path) {
             }
         }
         
+        // Process chain configurations (create custom chains)
+        std::cout << "Processing chain configurations..." << std::endl;
+        if (!chain_manager_.processChainConfigurations(config)) {
+            std::cerr << "Failed to process chain configurations: " << chain_manager_.getLastError() << std::endl;
+            return false;
+        }
+        std::cout << "Chain configurations processed successfully" << std::endl;
+        
+        // ✨ NEW: Process chain rules (populate chains with rules) - Phase 6.3.4
+        std::cout << "Processing chain rules..." << std::endl;
+        for (const auto& [chain_name, chain_config] : config.chain_definitions) {
+            if (!processChainConfig(chain_name, chain_config)) {
+                std::cerr << "Failed to process chain rules for: " << chain_name << std::endl;
+                return false;
+            }
+        }
+        std::cout << "Chain rules processed successfully" << std::endl;
+        
         // Process custom sections in the order they appear in YAML
         std::cout << "Custom sections: " << config.custom_sections.size() << std::endl;
         for (const auto& [section_name, section] : config.custom_sections) {
@@ -168,6 +191,14 @@ bool IptablesManager::loadConfig(const std::filesystem::path& config_path) {
                         std::cerr << "Failed to process interface configuration in section " << section_name << std::endl;
                         return false;
                     }
+                }
+            }
+            
+            // ✨ NEW: Process interface-based chain calls
+            if (section.interface_config) {
+                if (!processInterfaceChainCall(*section.interface_config, section_name)) {
+                    std::cerr << "Failed to process interface chain call in section " << section_name << std::endl;
+                    return false;
                 }
             }
             
@@ -369,6 +400,14 @@ bool IptablesManager::processPortConfig(const PortConfig& port, const std::strin
         // Handle regular rules in the specified chain
         std::string comment = "YAML:" + section_name + ":port:" + port_description + ":" + iface_comment + ":mac:" + mac_comment;
         
+        // ✨ NEW: Handle chain targets
+        if (port.chain) {
+            // Add chain information to comment
+            comment += ":chain:" + *port.chain;
+            
+            std::cout << "  Chain target: " << *port.chain << std::endl;
+        }
+        
         // Convert direction to chain name
         std::string chain;
         switch (port.direction) {
@@ -440,11 +479,11 @@ bool IptablesManager::processPortConfig(const PortConfig& port, const std::strin
             args.push_back(port_list.str());
         }
         
-        // Add comment and action
+        // ✨ NEW: Add target (action or chain)
         args.insert(args.end(), {
             "-m", "comment",
             "--comment", comment,
-            "-j", port.allow ? "ACCEPT" : "DROP"
+            "-j", port.chain ? *port.chain : (port.allow ? "ACCEPT" : "DROP")
         });
         
         auto result = CommandExecutor::executeIptables(args);
@@ -480,6 +519,11 @@ bool IptablesManager::processMacConfig(const MacConfig& mac, const std::string& 
         std::cout << std::endl;
     }
     
+    // ✨ NEW: Handle chain targets
+    if (mac.chain) {
+        std::cout << "  Chain target: " << *mac.chain << std::endl;
+    }
+    
     // Validate direction - only INPUT is allowed for MAC rules
     if (mac.direction != Direction::Input) {
         std::cerr << "MAC rules are only allowed in INPUT direction. Found direction: " << static_cast<int>(mac.direction) << std::endl;
@@ -494,6 +538,11 @@ bool IptablesManager::processMacConfig(const MacConfig& mac, const std::string& 
         iface_comment = "i:any:o:any";
     }
     std::string comment = "YAML:" + section_name + ":mac:" + mac.mac_source + ":" + iface_comment;
+    
+    // ✨ NEW: Add chain information to comment if present
+    if (mac.chain) {
+        comment += ":chain:" + *mac.chain;
+    }
     
     // Remove existing rules with this signature
     removeRulesBySignature("filter", "INPUT", comment);
@@ -524,11 +573,11 @@ bool IptablesManager::processMacConfig(const MacConfig& mac, const std::string& 
         args.push_back(subnet_list.str());
     }
     
-    // Add comment and action
+    // ✨ NEW: Add target (action or chain)
     args.insert(args.end(), {
         "-m", "comment",
         "--comment", comment,
-        "-j", mac.allow ? "ACCEPT" : "DROP"
+        "-j", mac.chain ? *mac.chain : (mac.allow ? "ACCEPT" : "DROP")
     });
     
     auto result = CommandExecutor::executeIptables(args);
@@ -633,6 +682,68 @@ bool IptablesManager::processActionConfig(const Action& action, const std::strin
     return true;
 }
 
+// ✨ NEW: Process interface-based chain calls
+bool IptablesManager::processInterfaceChainCall(const InterfaceConfig& interface, const std::string& section_name) {
+    std::cout << "Processing interface chain call for section: " << section_name << std::endl;
+    
+    if (interface.input) {
+        std::cout << "  Input interface: " << *interface.input << std::endl;
+    }
+    if (interface.output) {
+        std::cout << "  Output interface: " << *interface.output << std::endl;
+    }
+    if (interface.chain) {
+        std::cout << "  Target chain: " << *interface.chain << std::endl;
+    } else {
+        std::cerr << "Interface configuration must specify a chain target" << std::endl;
+        return false;
+    }
+    
+    // Generate rule comment for interface chain call
+    std::string iface_comment = "i:" + interface.input.value_or("any") + ":o:" + interface.output.value_or("any");
+    std::string comment = "YAML:" + section_name + ":chain_call:" + *interface.chain + ":" + iface_comment;
+    
+    // Determine which chain to add the rule to based on interface specification
+    std::string chain = "INPUT"; // Default to INPUT for interface-based chain calls
+    if (interface.output && !interface.input) {
+        chain = "OUTPUT"; // Only output interface specified
+    } else if (interface.input && interface.output) {
+        chain = "FORWARD"; // Both interfaces specified (routing)
+    }
+    
+    // Remove existing rules with this signature
+    removeRulesBySignature("filter", chain, comment);
+    
+    // Build iptables command for interface chain call
+    std::vector<std::string> args = {"-A", chain};
+    
+    // Add interface specifications if present
+    if (interface.input) {
+        args.push_back("-i");
+        args.push_back(*interface.input);
+    }
+    if (interface.output) {
+        args.push_back("-o");
+        args.push_back(*interface.output);
+    }
+    
+    // Jump to target chain
+    args.insert(args.end(), {
+        "-m", "comment",
+        "--comment", comment,
+        "-j", *interface.chain
+    });
+    
+    auto result = CommandExecutor::executeIptables(args);
+    if (!result.isSuccess()) {
+        std::cerr << "Failed to add interface chain call rule: " << result.getErrorMessage() << std::endl;
+        return false;
+    }
+    
+    std::cout << "Successfully added interface chain call to " << *interface.chain << " in " << chain << " chain" << std::endl;
+    return true;
+}
+
 bool IptablesManager::resetRules() {
     std::cout << "Resetting all iptables rules" << std::endl;
     
@@ -722,6 +833,13 @@ bool IptablesManager::removeYamlRules() {
         }
     }
     
+    // Clean up custom chains after removing rules
+    std::cout << "Cleaning up custom chains..." << std::endl;
+    if (!chain_manager_.cleanupChains()) {
+        std::cerr << "Warning: Failed to clean up some custom chains" << std::endl;
+        success = false;
+    }
+    
     // Reset policies to ACCEPT after removing rules (matching Rust implementation)
     auto input_policy = CommandExecutor::setChainPolicy("filter", "INPUT", "ACCEPT");
     auto output_policy = CommandExecutor::setChainPolicy("filter", "OUTPUT", "ACCEPT");
@@ -733,7 +851,7 @@ bool IptablesManager::removeYamlRules() {
     }
     
     if (success) {
-        std::cout << "Successfully removed all rules with YAML comments" << std::endl;
+        std::cout << "Successfully removed all rules with YAML comments and cleaned up custom chains" << std::endl;
     }
     
     return success;
@@ -854,6 +972,254 @@ InterfaceConfig IptablesManager::parseInterface(const YAML::Node& node) {
     }
     
     return config;
+}
+
+// ✨ NEW: Chain configuration processing methods (Phase 6.3.4)
+
+bool IptablesManager::createChain(const std::string& chain_name) {
+    std::cout << "Creating chain: " << chain_name << std::endl;
+    
+    // Check if chain already exists
+    auto check_result = CommandExecutor::executeIptables({"-L", chain_name, "-n"});
+    if (check_result.isSuccess()) {
+        std::cout << "Chain " << chain_name << " already exists, skipping creation" << std::endl;
+        return true;
+    }
+    
+    // Create the chain
+    auto result = CommandExecutor::executeIptables({"-N", chain_name});
+    if (!result.isSuccess()) {
+        std::cerr << "Failed to create chain " << chain_name << ": " << result.getErrorMessage() << std::endl;
+        return false;
+    }
+    
+    std::cout << "Successfully created chain: " << chain_name << std::endl;
+    return true;
+}
+
+bool IptablesManager::processChainConfig(const std::string& chain_name, const ChainConfig& chain_config) {
+    std::cout << "Processing chain configuration: " << chain_name << std::endl;
+    
+    // First, create the chain if it doesn't exist
+    if (!createChain(chain_name)) {
+        std::cerr << "Failed to create chain: " << chain_name << std::endl;
+        return false;
+    }
+    
+    // Process each chain rule in the configuration
+    for (const auto& chain_rule : chain_config.chain) {
+        std::cout << "Processing chain rule: " << chain_rule.name << " in chain " << chain_name << std::endl;
+        
+        if (!processChainRuleConfig(chain_name, chain_rule)) {
+            std::cerr << "Failed to process chain rule: " << chain_rule.name << std::endl;
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+bool IptablesManager::processChainRuleConfig(const std::string& chain_name, const ChainRuleConfig& chain_rule) {
+    std::cout << "Processing chain rule: " << chain_rule.name << " in chain " << chain_name << std::endl;
+    
+    // Process all rules within this chain rule configuration
+    if (!processChainRules(chain_name, chain_rule.rules)) {
+        return false;
+    }
+    
+    return true;
+}
+
+bool IptablesManager::processChainRules(const std::string& chain_name, const std::map<std::string, SectionConfig>& rules) {
+    std::cout << "Processing " << rules.size() << " rule groups in chain: " << chain_name << std::endl;
+    
+    // Process each rule group within the chain
+    for (const auto& [rule_group_name, section_config] : rules) {
+        std::cout << "Processing rule group: " << rule_group_name << " in chain " << chain_name << std::endl;
+        
+        // Process port rules in the chain
+        if (section_config.ports) {
+            for (const auto& port : *section_config.ports) {
+                // Create a modified port config that targets the chain instead of standard chains
+                PortConfig chain_port = port;
+                
+                // Generate rule comment for chain rule
+                std::string comment = "YAML:chain:" + chain_name + ":port:" + std::to_string(port.port.value_or(0));
+                if (port.range) {
+                    comment = "YAML:chain:" + chain_name + ":port:";
+                    for (size_t i = 0; i < port.range->size(); ++i) {
+                        if (i > 0) comment += ",";
+                        comment += (*port.range)[i];
+                    }
+                }
+                comment += ":" + getInterfaceComment(port.interface);
+                
+                // Remove existing rules with this signature in the chain
+                removeRulesBySignature("filter", chain_name, comment);
+                
+                // Build iptables command for the chain
+                std::vector<std::string> args = {"-A", chain_name};
+                
+                // Add protocol
+                args.push_back("-p");
+                args.push_back(port.protocol == Protocol::Tcp ? "tcp" : "udp");
+                
+                // Add port specification
+                if (port.port) {
+                    // Single port
+                    args.insert(args.end(), {"-m", port.protocol == Protocol::Tcp ? "tcp" : "udp"});
+                    args.insert(args.end(), {"--dport", std::to_string(*port.port)});
+                } else if (port.range && !port.range->empty()) {
+                    // Multiple port ranges using multiport
+                    args.insert(args.end(), {"-m", "multiport"});
+                    args.push_back("--dports");
+                    
+                    std::string port_list;
+                    for (size_t i = 0; i < port.range->size(); ++i) {
+                        if (i > 0) port_list += ",";
+                        // Convert "start-end" to "start:end" for iptables multiport
+                        std::string range_str = (*port.range)[i];
+                        std::replace(range_str.begin(), range_str.end(), '-', ':');
+                        port_list += range_str;
+                    }
+                    args.push_back(port_list);
+                }
+                
+                // Add subnet filtering if specified
+                if (port.subnet && !port.subnet->empty()) {
+                    std::string subnet_list;
+                    for (size_t i = 0; i < port.subnet->size(); ++i) {
+                        if (i > 0) subnet_list += ",";
+                        subnet_list += (*port.subnet)[i];
+                    }
+                    args.insert(args.end(), {"-s", subnet_list});
+                }
+                
+                // Add interface specifications if present
+                if (port.interface) {
+                    if (port.interface->input) {
+                        args.insert(args.end(), {"-i", *port.interface->input});
+                    }
+                    if (port.interface->output) {
+                        args.insert(args.end(), {"-o", *port.interface->output});
+                    }
+                }
+                
+                // Add MAC source filtering if specified
+                if (port.mac_source) {
+                    args.insert(args.end(), {"-m", "mac", "--mac-source", *port.mac_source});
+                }
+                
+                // Add comment and action
+                args.insert(args.end(), {
+                    "-m", "comment",
+                    "--comment", comment,
+                    "-j", port.allow ? "ACCEPT" : "DROP"
+                });
+                
+                auto result = CommandExecutor::executeIptables(args);
+                if (!result.isSuccess()) {
+                    std::cerr << "Failed to add port rule to chain " << chain_name 
+                             << ": " << result.getErrorMessage() << std::endl;
+                    return false;
+                }
+                
+                std::cout << "Successfully added port rule to chain " << chain_name 
+                         << ": port " << (port.port ? std::to_string(*port.port) : "range") 
+                         << " -> " << (port.allow ? "ACCEPT" : "DROP") << std::endl;
+            }
+        }
+        
+        // Process MAC rules in the chain
+        if (section_config.mac) {
+            for (const auto& mac : *section_config.mac) {
+                // Generate rule comment for chain MAC rule
+                std::string comment = "YAML:chain:" + chain_name + ":mac:" + mac.mac_source + ":" + getInterfaceComment(mac.interface);
+                
+                // Remove existing rules with this signature in the chain
+                removeRulesBySignature("filter", chain_name, comment);
+                
+                // Build iptables command for MAC rule in chain
+                std::vector<std::string> args = {"-A", chain_name};
+                
+                // Add MAC filtering
+                args.insert(args.end(), {"-m", "mac", "--mac-source", mac.mac_source});
+                
+                // Add subnet filtering if specified
+                if (mac.subnet && !mac.subnet->empty()) {
+                    std::string subnet_list;
+                    for (size_t i = 0; i < mac.subnet->size(); ++i) {
+                        if (i > 0) subnet_list += ",";
+                        subnet_list += (*mac.subnet)[i];
+                    }
+                    args.insert(args.end(), {"-s", subnet_list});
+                }
+                
+                // Add interface specifications if present (input only for MAC rules)
+                if (mac.interface && mac.interface->input) {
+                    args.insert(args.end(), {"-i", *mac.interface->input});
+                }
+                
+                // Add comment and action
+                args.insert(args.end(), {
+                    "-m", "comment",
+                    "--comment", comment,
+                    "-j", mac.allow ? "ACCEPT" : "DROP"
+                });
+                
+                auto result = CommandExecutor::executeIptables(args);
+                if (!result.isSuccess()) {
+                    std::cerr << "Failed to add MAC rule to chain " << chain_name 
+                             << ": " << result.getErrorMessage() << std::endl;
+                    return false;
+                }
+                
+                std::cout << "Successfully added MAC rule to chain " << chain_name 
+                         << ": MAC " << mac.mac_source << " -> " << (mac.allow ? "ACCEPT" : "DROP") << std::endl;
+            }
+        }
+        
+        // Process interface chain calls within the chain
+        if (section_config.interface_config && section_config.interface_config->chain) {
+            std::string target_chain = *section_config.interface_config->chain;
+            
+            // Generate rule comment for chain call
+            std::string comment = "YAML:chain:" + chain_name + ":chain_call:" + target_chain + ":" + getInterfaceComment(section_config.interface_config);
+            
+            // Remove existing rules with this signature in the chain
+            removeRulesBySignature("filter", chain_name, comment);
+            
+            // Build iptables command for chain call
+            std::vector<std::string> args = {"-A", chain_name};
+            
+            // Add interface specifications if present
+            if (section_config.interface_config->input) {
+                args.insert(args.end(), {"-i", *section_config.interface_config->input});
+            }
+            if (section_config.interface_config->output) {
+                args.insert(args.end(), {"-o", *section_config.interface_config->output});
+            }
+            
+            // Jump to target chain
+            args.insert(args.end(), {
+                "-m", "comment",
+                "--comment", comment,
+                "-j", target_chain
+            });
+            
+            auto result = CommandExecutor::executeIptables(args);
+            if (!result.isSuccess()) {
+                std::cerr << "Failed to add chain call rule to chain " << chain_name 
+                         << ": " << result.getErrorMessage() << std::endl;
+                return false;
+            }
+            
+            std::cout << "Successfully added chain call to " << target_chain 
+                     << " in chain " << chain_name << std::endl;
+        }
+    }
+    
+    return true;
 }
 
 } // namespace iptables 

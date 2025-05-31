@@ -6,6 +6,7 @@ A C++ implementation of iptables-compose, providing a structured way to manage i
 
 - **YAML Configuration**: Define iptables rules using human-readable YAML files
 - **Rule Types**: Support for TCP, UDP, and MAC-based rules
+- **✨ Multichain Support**: Create custom iptables chains for organized, reusable rule sets
 - **Multiport Support**: Configure multiple ports and port ranges efficiently using iptables multiport extension
 - **Rule Management**: Automatic rule identification with comments for easy management
 - **Rule Order Validation**: Intelligent analysis to detect unreachable and redundant rules
@@ -122,6 +123,143 @@ ssh:
       subnet: ["192.168.1.0/24"]  # Only allow from local network
 ```
 
+## ✨ Advanced Features
+
+### Multichain Support
+
+Create custom iptables chains for better rule organization and reusability:
+
+```yaml
+# Section that calls a custom chain
+security_filter:
+  interface:
+    input: "eth0"
+    chain: main_security_chain  # Call custom chain
+
+# Define the custom chain
+main_security_chain:
+  chain:
+    - name: "MAIN_SECURITY_CHAIN"
+      action: accept
+      rules:
+        # Allow web traffic
+        web_traffic:
+          ports:
+            - port: 80
+              allow: true
+            - port: 443
+              allow: true
+        # Call another chain for SSH filtering
+        ssh_check:
+          interface:
+            chain: ssh_security_chain
+        # Block dangerous ports
+        security_ports:
+          ports:
+            - port: 23  # Telnet
+              allow: false
+            - port: 21  # FTP
+              allow: false
+
+# SSH-specific security chain
+ssh_security_chain:
+  chain:
+    - name: "SSH_SECURITY_CHAIN" 
+      action: drop
+      rules:
+        admin_access:
+          ports:
+            - port: 22
+              subnet: ["192.168.1.0/24"]
+              allow: true
+```
+
+### Multiport Configuration
+
+Efficiently handle multiple ports and port ranges:
+
+```yaml
+development_ports:
+  ports:
+    # Single ports (traditional syntax)
+    - port: 3000
+      allow: true
+    
+    # Multiple port ranges (efficient multiport usage)
+    - range:
+        - "8000-8100"    # Development server range
+        - "9000-9100"    # Testing server range
+        - "3000-3010"    # Node.js applications
+      protocol: tcp
+      direction: input
+      allow: true
+```
+
+### Complex Security Configuration
+
+```yaml
+filter:
+  input: drop
+  output: accept
+  forward: drop
+
+# Main security entry point
+main_security:
+  interface:
+    input: "eth0"
+    chain: security_chain
+
+# Comprehensive security chain
+security_chain:
+  chain:
+    - name: "SECURITY_CHAIN"
+      action: drop  # Default drop for security
+      rules:
+        # Allow essential services
+        essential_services:
+          ports:
+            - port: 22    # SSH
+              subnet: ["192.168.1.0/24"]
+              allow: true
+            - port: 80    # HTTP
+              allow: true
+            - port: 443   # HTTPS
+              allow: true
+        
+        # Development tools (multiport ranges)
+        development:
+          ports:
+            - range: ["8000-8100", "3000-3010"]
+              subnet: ["192.168.1.0/24"]
+              allow: true
+        
+        # Call specialized chains
+        mac_filtering:
+          interface:
+            chain: mac_security_chain
+        
+        # Block specific threats
+        threat_prevention:
+          ports:
+            - port: 23    # Telnet
+              allow: false
+            - port: 21    # FTP
+              allow: false
+
+# MAC address filtering chain
+mac_security_chain:
+  chain:
+    - name: "MAC_SECURITY_CHAIN"
+      action: drop
+      rules:
+        trusted_devices:
+          mac:
+            - mac-source: "aa:bb:cc:dd:ee:ff"
+              allow: true
+            - mac-source: "11:22:33:44:55:66"
+              allow: true
+```
+
 ## 🔧 SystemD Deployment
 
 For production environments, `iptables-compose-cpp` can be deployed as a systemd service to automatically apply firewall rules at system startup with proper network timing dependencies.
@@ -177,10 +315,11 @@ iptables-compose-cpp/
 ├── 📄 install_dependencies.sh # Dependency installer
 ├── 📁 include/                # Header files
 │   ├── cli_parser.hpp         # Command line argument parsing
-│   ├── config.hpp             # Configuration structures (with multiport support)
+│   ├── config.hpp             # Configuration structures (with multiport & multichain support)
 │   ├── config_parser.hpp      # YAML configuration parser
 │   ├── command_executor.hpp   # Iptables command execution
 │   ├── iptables_manager.hpp   # Main iptables interface
+│   ├── chain_manager.hpp      # ✨ Custom chain management
 │   ├── rule.hpp              # Base rule class
 │   ├── tcp_rule.hpp          # TCP rule implementation (with multiport)
 │   ├── udp_rule.hpp          # UDP rule implementation (with multiport)
@@ -191,10 +330,11 @@ iptables-compose-cpp/
 ├── 📁 src/                   # Source files
 │   ├── main.cpp             # Application entry point
 │   ├── cli_parser.cpp       # CLI parsing implementation
-│   ├── config.cpp           # Configuration handling (with multiport validation)
+│   ├── config.cpp           # Configuration handling (with multiport & multichain validation)
 │   ├── config_parser.cpp    # YAML parsing logic
 │   ├── command_executor.cpp # Command execution engine
-│   ├── iptables_manager.cpp # Main business logic (with multiport processing)
+│   ├── iptables_manager.cpp # Main business logic (with multiport & multichain processing)
+│   ├── chain_manager.cpp    # ✨ Chain management implementation
 │   ├── rule_manager.cpp     # Rule management
 │   ├── rule_validator.cpp   # Rule validation implementation
 │   ├── tcp_rule.cpp        # TCP rule logic (with multiport support)

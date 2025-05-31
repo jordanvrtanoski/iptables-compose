@@ -4,6 +4,7 @@
 #include "tcp_rule.hpp"
 #include "udp_rule.hpp"
 #include "mac_rule.hpp"
+#include "chain_rule.hpp"
 #include "command_executor.hpp"
 #include <memory>
 #include <vector>

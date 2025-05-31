@@ -29,6 +29,54 @@ std::string Rule::actionToString() const {
     }
 }
 
+// ✨ NEW: Target resolution (action or chain)
+std::string Rule::getTargetString() const {
+    if (target_chain_.has_value()) {
+        return *target_chain_;
+    }
+    return actionToString();
+}
+
+// ✨ NEW: Validation for mutual exclusivity and correctness
+bool Rule::isValid() const {
+    // Note: For now we allow both action and chain to be set
+    // The target_chain takes precedence if set
+    // This allows backward compatibility while enabling chain support
+    
+    // Chain name validation (if set)
+    if (target_chain_.has_value()) {
+        const std::string& chain = *target_chain_;
+        // Basic chain name validation: non-empty, alphanumeric with underscores
+        if (chain.empty()) {
+            return false;
+        }
+        for (char c : chain) {
+            if (!std::isalnum(c) && c != '_' && c != '-') {
+                return false;
+            }
+        }
+    }
+    
+    return true;
+}
+
+std::string Rule::getValidationError() const {
+    if (target_chain_.has_value() && target_chain_->empty()) {
+        return "Chain target cannot be empty";
+    }
+    
+    if (target_chain_.has_value()) {
+        const std::string& chain = *target_chain_;
+        for (char c : chain) {
+            if (!std::isalnum(c) && c != '_' && c != '-') {
+                return "Chain name '" + chain + "' contains invalid characters. Only alphanumeric, underscore, and hyphen are allowed.";
+            }
+        }
+    }
+    
+    return "";
+}
+
 std::string Rule::getInterfaceComment() const {
     std::string in_iface = interface_.input.value_or("any");
     std::string out_iface = interface_.output.value_or("any");
@@ -79,6 +127,12 @@ void Rule::addCommentArgs(std::vector<std::string>& args, const std::string& com
     args.push_back(comment);
 }
 
+// ✨ NEW: Add target (action or chain)
+void Rule::addTargetArgs(std::vector<std::string>& args) const {
+    args.push_back("-j");
+    args.push_back(getTargetString());
+}
+
 std::string Rule::buildYamlComment(const std::string& section_name, 
                                  const std::string& rule_type,
                                  const std::string& details,
@@ -87,6 +141,11 @@ std::string Rule::buildYamlComment(const std::string& section_name,
     comment << "YAML:" << section_name << ":" << rule_type << ":" << details;
     comment << ":" << getInterfaceComment();
     comment << ":mac:" << mac_source;
+    
+    // Add target information if it's a chain
+    if (target_chain_.has_value()) {
+        comment << ":target:" << *target_chain_;
+    }
     
     // Add subnet information if present
     if (!subnets_.empty()) {

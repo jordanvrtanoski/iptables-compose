@@ -11,7 +11,8 @@ public:
             Action action,
             const InterfaceConfig& interface = InterfaceConfig{},
             const std::vector<std::string>& subnets = {},
-            const std::string& section_name = "default");
+            const std::string& section_name = "default",
+            const std::optional<std::string>& target_chain = std::nullopt);
 
     std::string getComment() const override;
     std::vector<std::string> buildIptablesCommand() const override;
@@ -19,6 +20,9 @@ public:
 
     const std::string& getMacSource() const { return mac_source_; }
     const std::string& getSectionName() const { return section_name_; }
+
+    bool isValid() const;
+    std::string getValidationError() const;
 
 private:
     std::string mac_source_;

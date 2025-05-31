@@ -1,6 +1,8 @@
 #pragma once
 
 #include "rule_manager.hpp"
+#include "chain_manager.hpp"
+#include "command_executor.hpp"
 #include "config.hpp"
 #include <string>
 #include <filesystem>
@@ -10,7 +12,7 @@ namespace iptables {
 
 class IptablesManager {
 public:
-    IptablesManager() = default;
+    IptablesManager();
     ~IptablesManager() = default;
 
     // Configuration management
@@ -28,6 +30,8 @@ public:
 
 private:
     RuleManager rule_manager_;
+    CommandExecutor command_executor_;
+    ChainManager chain_manager_;
 
     // Configuration processing
     bool processFilterConfig(const FilterConfig& filter);
@@ -35,6 +39,13 @@ private:
     bool processMacConfig(const MacConfig& mac, const std::string& section_name);
     bool processInterfaceConfig(const InterfaceRuleConfig& interface, const std::string& section_name);
     bool processActionConfig(const Action& action, const std::string& section_name);
+    bool processInterfaceChainCall(const InterfaceConfig& interface, const std::string& section_name);
+    
+    // ✨ NEW: Chain configuration processing methods (Phase 6.3.4)
+    bool createChain(const std::string& chain_name);
+    bool processChainConfig(const std::string& chain_name, const ChainConfig& chain_config);
+    bool processChainRuleConfig(const std::string& chain_name, const ChainRuleConfig& chain_rule);
+    bool processChainRules(const std::string& chain_name, const std::map<std::string, SectionConfig>& rules);
 
     // Configuration parsing (legacy methods)
     bool parseFilterConfig(const YAML::Node& node);

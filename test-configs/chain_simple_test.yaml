@@ -1,0 +1,24 @@
+# Simple chain test configuration
+# This tests basic chain rule processing
+
+filter:
+  input: accept
+  output: accept
+  forward: accept
+
+# Section with chain call
+test_entry:
+  interface:
+    input: "eth0"
+    chain: TEST_CHAIN
+
+# Simple chain definition
+test_chain_section:
+  chain:
+    - name: "TEST_CHAIN"
+      action: accept
+      rules:
+        simple_rule:
+          ports:
+            - port: 80
+              allow: true 

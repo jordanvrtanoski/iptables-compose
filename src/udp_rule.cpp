@@ -10,18 +10,63 @@ UdpRule::UdpRule(uint16_t port,
                  const std::vector<std::string>& subnets,
                  std::optional<std::string> mac_source,
                  std::optional<uint16_t> forward_port,
-                 const std::string& section_name)
-    : Rule(direction, action, interface, subnets)
+                 const std::string& section_name,
+                 const std::optional<std::string>& target_chain)
+    : Rule(direction, action, interface, subnets, target_chain)
     , port_(port)
     , mac_source_(std::move(mac_source))
     , forward_port_(forward_port)
     , section_name_(section_name) {}
+
+bool UdpRule::isValid() const {
+    if (!Rule::isValid()) {
+        return false;
+    }
+    
+    if (forward_port_.has_value() && target_chain_.has_value()) {
+        return false;
+    }
+    
+    if (port_ == 0 || port_ > 65535) {
+        return false;
+    }
+    
+    if (forward_port_.has_value() && (*forward_port_ == 0 || *forward_port_ > 65535)) {
+        return false;
+    }
+    
+    return true;
+}
+
+std::string UdpRule::getValidationError() const {
+    std::string base_error = Rule::getValidationError();
+    if (!base_error.empty()) {
+        return base_error;
+    }
+    
+    if (forward_port_.has_value() && target_chain_.has_value()) {
+        return "Port forwarding cannot be used with chain targets";
+    }
+    
+    if (port_ == 0 || port_ > 65535) {
+        return "Port number must be between 1 and 65535";
+    }
+    
+    if (forward_port_.has_value() && (*forward_port_ == 0 || *forward_port_ > 65535)) {
+        return "Forward port number must be between 1 and 65535";
+    }
+    
+    return "";
+}
 
 std::string UdpRule::getComment() const {
     std::string mac_comment = mac_source_.value_or("any");
     
     if (forward_port_) {
         std::string details = "port:" + std::to_string(port_) + ":forward:" + std::to_string(*forward_port_);
+        return buildYamlComment(section_name_, "udp", details, mac_comment);
+    } else if (target_chain_.has_value()) {
+        std::string details = "port:" + std::to_string(port_) + ":chain:" + *target_chain_;
         return buildYamlComment(section_name_, "udp", details, mac_comment);
     } else {
         std::string details = "port:" + std::to_string(port_);
@@ -32,26 +77,20 @@ std::string UdpRule::getComment() const {
 std::vector<std::string> UdpRule::buildIptablesCommand() const {
     std::vector<std::string> args;
     
-    // Handle port forwarding (NAT table)
     if (forward_port_) {
         return buildPortForwardingCommand();
     }
     
-    // Standard filtering rule (filter table)
     args.push_back("-A");
     args.push_back(directionToString());
     
-    // Protocol specification
     args.push_back("-p");
     args.push_back("udp");
     
-    // Add interface arguments
     addInterfaceArgs(args);
     
-    // Add subnet filtering
     addSubnetArgs(args);
     
-    // Add MAC source filtering if specified
     if (mac_source_.has_value()) {
         args.push_back("-m");
         args.push_back("mac");
@@ -59,15 +98,11 @@ std::vector<std::string> UdpRule::buildIptablesCommand() const {
         args.push_back(*mac_source_);
     }
     
-    // Port specification
     args.push_back("--dport");
     args.push_back(std::to_string(port_));
     
-    // Action
-    args.push_back("-j");
-    args.push_back(actionToString());
+    addTargetArgs(args);
     
-    // Add comment
     addCommentArgs(args, getComment());
     
     return args;
@@ -76,26 +111,21 @@ std::vector<std::string> UdpRule::buildIptablesCommand() const {
 std::vector<std::string> UdpRule::buildPortForwardingCommand() const {
     std::vector<std::string> args;
     
-    // Port forwarding uses NAT table, PREROUTING chain
     args.push_back("-t");
     args.push_back("nat");
     args.push_back("-A");
     args.push_back("PREROUTING");
     
-    // Protocol specification
     args.push_back("-p");
     args.push_back("udp");
     
-    // Only input interface makes sense for PREROUTING
     if (interface_.input.has_value()) {
         args.push_back("-i");
         args.push_back(*interface_.input);
     }
     
-    // Add subnet filtering for source
     addSubnetArgs(args);
     
-    // Add MAC source filtering if specified
     if (mac_source_.has_value()) {
         args.push_back("-m");
         args.push_back("mac");
@@ -103,24 +133,20 @@ std::vector<std::string> UdpRule::buildPortForwardingCommand() const {
         args.push_back(*mac_source_);
     }
     
-    // Destination port
     args.push_back("--dport");
     args.push_back(std::to_string(port_));
     
-    // REDIRECT action with target port
     args.push_back("-j");
     args.push_back("REDIRECT");
     args.push_back("--to-port");
     args.push_back(std::to_string(*forward_port_));
     
-    // Add comment
     addCommentArgs(args, getComment());
     
     return args;
 }
 
 bool UdpRule::matches(const std::string& comment) const {
-    // Enhanced matching to check for YAML comment structure and UDP specifics
     std::string expected_comment = getComment();
     return comment.find(expected_comment) != std::string::npos ||
            (comment.find("YAML:" + section_name_ + ":udp:port:" + std::to_string(port_)) != std::string::npos);

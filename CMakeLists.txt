@@ -17,12 +17,14 @@ add_executable(iptables-compose-cpp
     src/tcp_rule.cpp
     src/udp_rule.cpp
     src/mac_rule.cpp
+    src/chain_rule.cpp
     src/config.cpp
     src/config_parser.cpp
     src/cli_parser.cpp
     src/system_utils.cpp
     src/command_executor.cpp
     src/rule_validator.cpp
+    src/chain_manager.cpp
 )
 
 # Include directories

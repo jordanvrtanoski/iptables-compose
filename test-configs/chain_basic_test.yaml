@@ -1,0 +1,31 @@
+# Basic chain test configuration
+# This tests the fundamental chain functionality
+
+filter:
+  input: accept
+  output: accept
+  forward: accept
+
+# Section with chain call
+web_filter:
+  interface:
+    input: "eth0"
+    chain: web_security_chain
+
+# Chain definition
+web_security_chain:
+  chain:
+    - name: "WEB_SECURITY_CHAIN"
+      action: accept
+      rules:
+        allowed_ports:
+          ports:
+            - port: 80
+              allow: true
+            - port: 443
+              allow: true
+        blocked_ips:
+          ports:
+            - port: 80
+              subnet: ["10.0.0.0/8"]
+              allow: false 

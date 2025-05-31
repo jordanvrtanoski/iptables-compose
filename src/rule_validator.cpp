@@ -3,6 +3,7 @@
 #include <sstream>
 #include <algorithm>
 #include <arpa/inet.h>
+#include <functional>
 
 namespace iptables {
 
@@ -328,6 +329,285 @@ bool RuleValidator::isInterfaceMoreSpecific(const std::optional<std::string>& sp
     
     // Both have values - they must match exactly for general to cover specific
     return *general == *specific;
+}
+
+// ✨ NEW: Validate chain configurations and references
+std::vector<ValidationWarning> RuleValidator::validateChainReferences(const Config& config) {
+    std::vector<ValidationWarning> warnings;
+    
+    // Collect all defined chains
+    std::set<std::string> defined_chains;
+    for (const auto& [chain_name, chain_config] : config.chain_definitions) {
+        if (chain_config.chain.empty()) {
+            continue;
+        }
+        for (const auto& chain_rule : chain_config.chain) {
+            defined_chains.insert(chain_rule.name);
+        }
+    }
+    
+    // Check chain references in sections
+    for (const auto& [section_name, section] : config.custom_sections) {
+        // Check interface config chain references
+        if (section.interface_config && section.interface_config->chain) {
+            const std::string& referenced_chain = *section.interface_config->chain;
+            if (defined_chains.find(referenced_chain) == defined_chains.end()) {
+                ValidationWarning warning;
+                warning.type = ValidationWarning::Type::InvalidChainReference;
+                warning.section_name = section_name;
+                warning.rule_index = 0;
+                warning.message = "Section '" + section_name + "' references undefined chain '" + referenced_chain + "'";
+                warnings.push_back(warning);
+            }
+        }
+        
+        // Check port config direct chain references
+        if (section.ports) {
+            for (size_t i = 0; i < section.ports->size(); ++i) {
+                const auto& port = (*section.ports)[i];
+                if (port.chain) {
+                    const std::string& referenced_chain = *port.chain;
+                    if (defined_chains.find(referenced_chain) == defined_chains.end()) {
+                        ValidationWarning warning;
+                        warning.type = ValidationWarning::Type::InvalidChainReference;
+                        warning.section_name = section_name;
+                        warning.rule_index = i;
+                        warning.message = "Port rule in section '" + section_name + "' references undefined chain '" + referenced_chain + "'";
+                        warnings.push_back(warning);
+                    }
+                }
+                
+                // Also check interface chain references within port rules
+                if (port.interface && port.interface->chain) {
+                    const std::string& referenced_chain = *port.interface->chain;
+                    if (defined_chains.find(referenced_chain) == defined_chains.end()) {
+                        ValidationWarning warning;
+                        warning.type = ValidationWarning::Type::InvalidChainReference;
+                        warning.section_name = section_name;
+                        warning.rule_index = i;
+                        warning.message = "Port rule interface in section '" + section_name + "' references undefined chain '" + referenced_chain + "'";
+                        warnings.push_back(warning);
+                    }
+                }
+            }
+        }
+        
+        // Check MAC config direct chain references
+        if (section.mac) {
+            for (size_t i = 0; i < section.mac->size(); ++i) {
+                const auto& mac = (*section.mac)[i];
+                if (mac.chain) {
+                    const std::string& referenced_chain = *mac.chain;
+                    if (defined_chains.find(referenced_chain) == defined_chains.end()) {
+                        ValidationWarning warning;
+                        warning.type = ValidationWarning::Type::InvalidChainReference;
+                        warning.section_name = section_name;
+                        warning.rule_index = i;
+                        warning.message = "MAC rule in section '" + section_name + "' references undefined chain '" + referenced_chain + "'";
+                        warnings.push_back(warning);
+                    }
+                }
+                
+                // Also check interface chain references within MAC rules
+                if (mac.interface && mac.interface->chain) {
+                    const std::string& referenced_chain = *mac.interface->chain;
+                    if (defined_chains.find(referenced_chain) == defined_chains.end()) {
+                        ValidationWarning warning;
+                        warning.type = ValidationWarning::Type::InvalidChainReference;
+                        warning.section_name = section_name;
+                        warning.rule_index = i;
+                        warning.message = "MAC rule interface in section '" + section_name + "' references undefined chain '" + referenced_chain + "'";
+                        warnings.push_back(warning);
+                    }
+                }
+            }
+        }
+    }
+    
+    // Check for circular dependencies
+    if (hasCircularChainDependencies(config)) {
+        ValidationWarning warning;
+        warning.type = ValidationWarning::Type::CircularChainDependency;
+        warning.section_name = "global";
+        warning.rule_index = 0;
+        warning.message = "Circular chain dependencies detected in configuration";
+        warnings.push_back(warning);
+    }
+    
+    return warnings;
+}
+
+// ✨ NEW: Validate individual port rule for chain vs. action mutual exclusivity
+std::optional<ValidationWarning> RuleValidator::validatePortConfigChains(
+    const PortConfig& port_config, 
+    const std::string& section_name, 
+    size_t rule_index) {
+    
+    // Check if both direct chain and action are specified
+    bool has_direct_chain = port_config.chain.has_value();
+    bool has_forward = port_config.forward.has_value();
+    
+    if (has_direct_chain && has_forward) {
+        ValidationWarning warning;
+        warning.type = ValidationWarning::Type::ChainActionConflict;
+        warning.section_name = section_name;
+        warning.rule_index = rule_index;
+        warning.message = "Port rule cannot have both chain target and port forwarding";
+        return warning;
+    }
+    
+    // Check if both chain and action are specified through interface config
+    bool has_interface_chain = port_config.interface && port_config.interface->chain.has_value();
+    
+    if (has_interface_chain && has_forward) {
+        ValidationWarning warning;
+        warning.type = ValidationWarning::Type::ChainActionConflict;
+        warning.section_name = section_name;
+        warning.rule_index = rule_index;
+        warning.message = "Port rule cannot have both interface chain reference and port forwarding";
+        return warning;
+    }
+    
+    return std::nullopt;
+}
+
+// ✨ NEW: Validate MAC rule for chain vs. action mutual exclusivity
+std::optional<ValidationWarning> RuleValidator::validateMacConfigChains(
+    const MacConfig& mac_config, 
+    const std::string& section_name, 
+    size_t rule_index) {
+    
+    // Check if both direct chain and action are specified
+    bool has_direct_chain = mac_config.chain.has_value();
+    
+    // For MAC rules, we don't need to check allow since it's always present
+    // The conflict is only if both chain and allow=false are specified
+    // But since allow is always present, we only check for chain conflicts with interface chains
+    
+    // Check if both chain and action are specified through interface config
+    bool has_interface_chain = mac_config.interface && mac_config.interface->chain.has_value();
+    
+    // MAC rules with direct chain targets are valid - no conflict to check
+    // The conflict would be at the rule generation level, not validation level
+    
+    return std::nullopt;
+}
+
+// ✨ NEW: Check for circular chain dependencies
+bool RuleValidator::hasCircularChainDependencies(const Config& config) {
+    // Build dependency graph
+    std::map<std::string, std::set<std::string>> dependencies;
+    
+    // Collect all defined chains first
+    std::set<std::string> defined_chains;
+    for (const auto& [chain_name, chain_config] : config.chain_definitions) {
+        if (chain_config.chain.empty()) {
+            continue;
+        }
+        for (const auto& chain_rule : chain_config.chain) {
+            defined_chains.insert(chain_rule.name);
+            dependencies[chain_rule.name] = std::set<std::string>();
+        }
+    }
+    
+    // Collect chain dependencies from chain definitions
+    for (const auto& [chain_name, chain_config] : config.chain_definitions) {
+        if (chain_config.chain.empty()) {
+            continue;
+        }
+        for (const auto& chain_rule : chain_config.chain) {
+            const std::string& current_chain = chain_rule.name;
+            
+            // Check dependencies in chain rules
+            for (const auto& [rule_name, rule_config] : chain_rule.rules) {
+                // Check interface chain calls
+                if (rule_config.interface_config && rule_config.interface_config->chain) {
+                    const std::string& referenced_chain = *rule_config.interface_config->chain;
+                    if (defined_chains.find(referenced_chain) != defined_chains.end()) {
+                        dependencies[current_chain].insert(referenced_chain);
+                    }
+                }
+                
+                // Check port config chain references
+                if (rule_config.ports) {
+                    for (const auto& port : *rule_config.ports) {
+                        if (port.chain) {
+                            const std::string& referenced_chain = *port.chain;
+                            if (defined_chains.find(referenced_chain) != defined_chains.end()) {
+                                dependencies[current_chain].insert(referenced_chain);
+                            }
+                        }
+                        if (port.interface && port.interface->chain) {
+                            const std::string& referenced_chain = *port.interface->chain;
+                            if (defined_chains.find(referenced_chain) != defined_chains.end()) {
+                                dependencies[current_chain].insert(referenced_chain);
+                            }
+                        }
+                    }
+                }
+                
+                // Check MAC config chain references
+                if (rule_config.mac) {
+                    for (const auto& mac : *rule_config.mac) {
+                        if (mac.chain) {
+                            const std::string& referenced_chain = *mac.chain;
+                            if (defined_chains.find(referenced_chain) != defined_chains.end()) {
+                                dependencies[current_chain].insert(referenced_chain);
+                            }
+                        }
+                        if (mac.interface && mac.interface->chain) {
+                            const std::string& referenced_chain = *mac.interface->chain;
+                            if (defined_chains.find(referenced_chain) != defined_chains.end()) {
+                                dependencies[current_chain].insert(referenced_chain);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Use DFS to detect cycles
+    std::set<std::string> visiting;  // Currently being visited (gray nodes)
+    std::set<std::string> visited;   // Already processed (black nodes)
+    
+    std::function<bool(const std::string&)> hasCycleDFS = [&](const std::string& chain) -> bool {
+        if (visiting.find(chain) != visiting.end()) {
+            // Found a back edge - cycle detected
+            return true;
+        }
+        
+        if (visited.find(chain) != visited.end()) {
+            // Already processed this chain
+            return false;
+        }
+        
+        visiting.insert(chain);
+        
+        // Visit all dependencies
+        if (dependencies.find(chain) != dependencies.end()) {
+            for (const std::string& dependency : dependencies[chain]) {
+                if (hasCycleDFS(dependency)) {
+                    return true;
+                }
+            }
+        }
+        
+        visiting.erase(chain);
+        visited.insert(chain);
+        return false;
+    };
+    
+    // Check each chain for cycles
+    for (const std::string& chain : defined_chains) {
+        if (visited.find(chain) == visited.end()) {
+            if (hasCycleDFS(chain)) {
+                return true;
+            }
+        }
+    }
+    
+    return false;
 }
 
 } // namespace iptables 

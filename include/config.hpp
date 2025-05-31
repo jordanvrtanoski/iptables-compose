@@ -9,6 +9,11 @@
 
 namespace iptables {
 
+// Forward declarations to resolve circular dependencies
+struct SectionConfig;
+struct ChainRuleConfig;
+struct ChainConfig;
+
 // Enum for policies (matching Rust Policy enum)
 enum class Policy {
     Accept,
@@ -27,6 +32,8 @@ struct PortConfig {
     bool allow = true;
     std::optional<InterfaceConfig> interface;
     std::optional<std::string> mac_source;
+    // ✨ NEW: Direct chain target (mutually exclusive with allow/forward)
+    std::optional<std::string> chain;
 
     bool isValid() const;
     std::string getErrorMessage() const;
@@ -42,6 +49,8 @@ struct MacConfig {
     std::optional<std::vector<std::string>> subnet;
     bool allow = true;
     std::optional<InterfaceConfig> interface;
+    // ✨ NEW: Direct chain target (mutually exclusive with allow)
+    std::optional<std::string> chain;
 
     bool isValid() const;
     std::string getErrorMessage() const;
@@ -69,14 +78,36 @@ struct InterfaceRuleConfig {
     std::string getErrorMessage() const;
 };
 
+// ✨ NEW: Chain rule configuration for individual chain definitions
+struct ChainRuleConfig {
+    std::string name;                                    // Chain name (e.g., "MAC_RULES_ETH1")
+    Action action = Action::Accept;                      // Default action for chain
+    std::map<std::string, SectionConfig> rules;         // Named rule groups within chain
+
+    bool isValid() const;
+    std::string getErrorMessage() const;
+};
+
+// ✨ NEW: Chain configuration for chain arrays
+struct ChainConfig {
+    std::vector<ChainRuleConfig> chain;                  // Array of chain definitions
+
+    bool isValid() const;
+    std::string getErrorMessage() const;
+};
+
 // Section configuration matching Rust SectionConfig
 // Note: Order of rules within each vector is preserved from YAML
 struct SectionConfig {
     std::optional<std::vector<PortConfig>> ports;
     std::optional<std::vector<MacConfig>> mac;
     std::optional<std::vector<InterfaceRuleConfig>> interface;
+    // ✨ NEW: Interface configuration for chain calls and interface-based rules
+    std::optional<InterfaceConfig> interface_config;
     // Action field for general catch-all rules (e.g., dropall section)
     std::optional<Action> action;
+    // ✨ NEW: Chain configuration for chain definition sections
+    std::optional<ChainConfig> chain_config;
 
     bool isValid() const;
     std::string getErrorMessage() const;
@@ -87,6 +118,8 @@ struct Config {
     std::optional<FilterConfig> filter;
     // Use vector of pairs to preserve the order of sections as they appear in YAML
     std::vector<std::pair<std::string, SectionConfig>> custom_sections;
+    // ✨ NEW: Extracted chain definitions for dependency resolution
+    std::map<std::string, ChainConfig> chain_definitions;
 
     bool isValid() const;
     std::string getErrorMessage() const;
@@ -143,6 +176,18 @@ template<>
 struct convert<iptables::InterfaceRuleConfig> {
     static Node encode(const iptables::InterfaceRuleConfig& config);
     static bool decode(const Node& node, iptables::InterfaceRuleConfig& config);
+};
+
+template<>
+struct convert<iptables::ChainRuleConfig> {
+    static Node encode(const iptables::ChainRuleConfig& config);
+    static bool decode(const Node& node, iptables::ChainRuleConfig& config);
+};
+
+template<>
+struct convert<iptables::ChainConfig> {
+    static Node encode(const iptables::ChainConfig& config);
+    static bool decode(const Node& node, iptables::ChainConfig& config);
 };
 
 template<>

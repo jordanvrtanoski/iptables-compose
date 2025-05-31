@@ -1,0 +1,73 @@
+# Complex chain test configuration
+# This tests advanced chain features like dependency resolution
+
+filter:
+  input: accept
+  output: accept
+  forward: accept
+
+# Main security filtering entry point
+security_entry:
+  interface:
+    input: "eth0"
+    chain: main_security_chain
+
+# SSH access control entry point
+ssh_entry:
+  interface:
+    input: "any"
+    chain: ssh_security_chain
+
+# Main security chain - calls other chains
+main_security_chain:
+  chain:
+    - name: "MAIN_SECURITY_CHAIN"
+      action: drop
+      rules:
+        web_traffic:
+          ports:
+            - port: 80
+              allow: true
+            - port: 443
+              allow: true
+        call_ssh_check:
+          interface:
+            chain: ssh_security_chain
+        dangerous_ports:
+          ports:
+            - port: 23
+              allow: false
+            - port: 21
+              allow: false
+
+# SSH security chain - called by main chain
+ssh_security_chain:
+  chain:
+    - name: "SSH_SECURITY_CHAIN"
+      action: drop
+      rules:
+        admin_access:
+          ports:
+            - port: 22
+              subnet: ["192.168.1.0/24"]
+              allow: true
+        public_access:
+          ports:
+            - port: 22
+              subnet: ["0.0.0.0/0"]
+              allow: false
+
+# MAC filtering chain
+mac_security_chain:
+  chain:
+    - name: "MAC_SECURITY_CHAIN"
+      action: accept
+      rules:
+        allowed_macs:
+          mac:
+            - mac-source: "00:11:22:33:44:55"
+              direction: input
+              allow: true
+            - mac-source: "aa:bb:cc:dd:ee:ff"
+              direction: input
+              allow: true 

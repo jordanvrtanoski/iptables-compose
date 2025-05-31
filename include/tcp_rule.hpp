@@ -13,7 +13,8 @@ public:
             const std::vector<std::string>& subnets = {},
             std::optional<std::string> mac_source = std::nullopt,
             std::optional<uint16_t> forward_port = std::nullopt,
-            const std::string& section_name = "default");
+            const std::string& section_name = "default",
+            const std::optional<std::string>& target_chain = std::nullopt);
 
     std::string getComment() const override;
     std::vector<std::string> buildIptablesCommand() const override;
@@ -23,6 +24,9 @@ public:
     std::optional<uint16_t> getForwardPort() const { return forward_port_; }
     std::optional<std::string> getMacSource() const { return mac_source_; }
     const std::string& getSectionName() const { return section_name_; }
+
+    bool isValid() const;
+    std::string getValidationError() const;
 
 private:
     uint16_t port_;

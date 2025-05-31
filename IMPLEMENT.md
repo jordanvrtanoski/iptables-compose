@@ -1152,50 +1152,315 @@ The foundation (Phase 4.1) is completely implemented and the application success
 - [x] **Configuration examples and syntax documentation**
 - [x] **Troubleshooting guide for multiport issues**
 
-## Chapter 5: Implementation Verification Summary
+### 5.9 ✨ **NEW: Multichain Implementation (Phase 6.3.3) ✅ COMPLETE**
 
-### 5.1 ✅ **MULTIPORT IMPLEMENTATION COMPLETE**
+#### 6.3.3 Rule Generation Enhancement ✅
+- [x] **Complete `ChainRule` class implementation extending base `Rule` class**
+- [x] **Chain jump command generation (`-j CUSTOM_CHAIN`) with full iptables syntax**
+- [x] **Enhanced `TcpRule` with optional chain target support (`target_chain` parameter)**
+- [x] **Enhanced `UdpRule` with optional chain target support (`target_chain` parameter)**
+- [x] **Enhanced `MacRule` with optional chain target support (`target_chain` parameter)**
+- [x] **Advanced rule comment generation for chain-based signatures**
+- [x] **Comprehensive validation for chain vs. action mutual exclusivity**
+- [x] **Enhanced rule signature system with chain call support**
+- [x] **Complete support for interface-based chain calls**
+- [x] **Updated rule matching logic for chain-enabled rules**
+- [x] **YAML conversion template specialization for ChainRule class**
+- [x] **Chain dependency validation with circular dependency detection**
 
-**All multiport features have been successfully implemented and tested:**
+#### Advanced Chain Features ✅
+- [x] **Base `Rule` class enhanced with `target_chain_` member and `getTargetString()` method**
+- [x] **Chain target validation with name format checking**
+- [x] **Enhanced `addTargetArgs()` method for action/chain resolution**
+- [x] **Mutual exclusivity validation between port forwarding and chain targets**
+- [x] **Advanced comment generation with chain information included**
+- [x] **Rule validator enhancement with `hasCircularChainDependencies()` implementation**
 
-#### Core Multiport Functionality ✅
-- **Configuration Structure**: Enhanced `PortConfig` with `std::optional<std::vector<std::string>> range` field
-- **Mutual Exclusivity**: Complete validation ensuring `port` and `range` cannot both be specified
-- **Range Validation**: Comprehensive format checking, port bounds validation, and logical validation
-- **YAML Parsing**: Full support for range arrays with proper error handling
-- **Command Generation**: Optimized iptables commands using multiport extension
-- **Backward Compatibility**: All existing single-port configurations continue to work unchanged
+## Chapter 6: Multichain Support Implementation Plan
 
-#### Advanced Features ✅
-- **Rule Validation**: Enhanced rule validator with multiport rule analysis
-- **Error Handling**: Comprehensive error messages for all multiport validation scenarios
-- **Debug Mode**: Full validation support without applying changes
-- **Port Forwarding Restriction**: Prevents invalid combinations of ranges with forwarding
-- **Rule Order Analysis**: Enhanced conflict detection for multiport rules
+## 6.1 Feature Overview
 
-#### Testing and Verification ✅
-- **Live Testing**: Successfully tested with actual iptables commands
-- **Configuration Validation**: Tested valid and invalid multiport configurations
-- **Error Detection**: Verified that validation catches all error scenarios
-- **Backward Compatibility**: Confirmed existing configurations work unchanged
+The multichain feature allows users to create custom iptables chains with organized rule sets that can be called from other rules. This provides better rule organization, reusability, and modularity in firewall configuration.
 
-### 5.2 Ready for Production Use
+### 6.1.1 Configuration Structure Analysis
 
-The iptables-compose-cpp implementation is now **feature-complete** with:
+Based on `example.yaml`, the multichain feature supports:
 
-- ✅ All original Rust features ported
-- ✅ **Multiport support added** (enhancement beyond original Rust version)
-- ✅ **Rule validation system** (enhancement beyond original Rust version)
-- ✅ Comprehensive error handling and validation
-- ✅ Production-ready code quality
-- ✅ Complete documentation and examples
-- ✅ Backward compatibility maintained
-- ✅ Enhanced performance through multiport optimization
+1. **Chain Reference in Rules**: Existing sections can reference custom chains using `chain` field
+2. **Custom Chain Definitions**: New top-level sections defining chain structure with rules
+3. **Hierarchical Rule Organization**: Rules grouped within chains for better organization
 
----
+Example configuration pattern:
+```yaml
+# Section referencing a custom chain
+mac_filter:
+  interface:
+    input: "eth1"
+    chain: mac_rules_eth1    # References custom chain
 
-**Implementation Status: COMPLETE ✅**
-**Multiport Support: COMPLETE ✅**
-**Ready for Repository Publication**
+# Custom chain definition
+mac_rules_eth1:
+  chain:
+    - name: "MAC_RULES_ETH1"
+      action: accept
+      rules:
+        enb1_mac:
+          mac:
+            - mac-source: "00:11:22:33:44:55"
+              direction: input
+              allow: true
+        enb2_mac:
+          mac:
+            - mac-source: "aa:bb:cc:dd:ee:ff"
+              direction: input
+              allow: true
+```
 
-*Last Updated: December 2024*
+### 6.1.2 iptables Implementation Strategy
+
+The feature translates to iptables commands:
+1. **Chain Creation**: `iptables -N CUSTOM_CHAIN_NAME`
+2. **Chain Rules**: `iptables -A CUSTOM_CHAIN_NAME -m mac --mac-source ... -j ACCEPT`
+3. **Chain Calls**: `iptables -A INPUT -i eth1 -j MAC_RULES_ETH1`
+4. **Chain Management**: Proper creation order and cleanup
+
+## 6.2 Architecture Enhancement
+
+### 6.2.1 Configuration Structure Updates
+
+**New Configuration Types**:
+```cpp
+struct ChainRuleConfig {
+    std::string name;                                    // Chain name (e.g., "MAC_RULES_ETH1")
+    Action action = Action::Accept;                      // Default action for chain
+    std::map<std::string, SectionConfig> rules;         // Named rule groups within chain
+};
+
+struct ChainConfig {
+    std::vector<ChainRuleConfig> chain;                  // Array of chain definitions
+};
+
+struct InterfaceConfig {
+    std::optional<std::string> input;                    // Input interface
+    std::optional<std::string> output;                   // Output interface
+    std::optional<std::string> chain;                    // ✨ NEW: Custom chain to call
+};
+
+struct SectionConfig {
+    std::vector<PortConfig> ports;
+    std::vector<MacConfig> mac_rules;
+    std::optional<InterfaceConfig> interface;            // ✨ ENHANCED: Now supports chain calls
+    std::optional<ChainConfig> chain_config;             // ✨ NEW: For chain definition sections
+};
+```
+
+**Enhanced Config Root Structure**:
+```cpp
+struct Config {
+    std::optional<FilterConfig> filter;
+    std::vector<std::pair<std::string, SectionConfig>> custom_sections;  // Preserves order
+    std::map<std::string, ChainConfig> chain_definitions;                // ✨ NEW: Extracted chain definitions
+};
+```
+
+### 6.2.2 Rule Processing Flow Enhancement
+
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   YAML Parser   │───→│  Chain Extractor │───→│  Dependency     │
+│   (enhanced)    │    │   (NEW)          │    │  Resolver (NEW) │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+         │                       │                       │
+         ▼                       ▼                       ▼
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│ Section Parser  │    │  Chain Manager   │    │  Rule Generator │
+│   (enhanced)    │    │   (NEW)          │    │   (enhanced)    │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+         │                       │                       │
+         ▼                       ▼                       ▼
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│ IptablesManager │    │  Command Executor│    │   System        │
+│   (enhanced)    │    │   (enhanced)     │    │   (iptables)    │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+```
+
+## 6.3 Implementation Tasks
+
+### 6.3.1 Phase 6.1: Configuration Structure Enhancement
+- [x] Update `InterfaceConfig` to support optional `chain` field
+- [x] Create `ChainRuleConfig` structure for individual chain definitions
+- [x] Create `ChainConfig` structure for chain arrays
+- [x] Update `SectionConfig` to include optional `ChainConfig`
+- [x] Update `Config` to support chain definitions extraction
+- [x] Add YAML parsing support for new structures
+- [x] Add validation for chain references and definitions
+- [x] Update existing YAML template specializations
+- [x] Add chain definition extraction logic during config parsing
+- [x] Add chain reference validation (ensure referenced chains exist)
+
+### 6.3.2 Phase 6.2: Chain Management System
+- [x] Create `ChainManager` class for custom chain operations
+- [x] Implement `createChain()` method for iptables chain creation
+- [x] Implement `deleteChain()` method for iptables chain removal
+- [x] Implement `flushChain()` method for clearing chain rules
+- [x] Implement `chainExists()` method for chain validation
+- [x] Add chain dependency resolution logic
+- [x] Add chain creation order management
+- [x] Add chain cleanup and removal logic
+- [x] Add error handling for chain operations
+- [x] Add chain listing and validation methods
+
+### 6.3.3 Phase 6.3: Rule Generation Enhancement
+- [x] Create `ChainRule` class extending base `Rule` class
+- [x] Implement chain jump command generation (`-j CUSTOM_CHAIN`)
+- [x] Update `TcpRule` to support chain target instead of action
+- [x] Update `UdpRule` to support chain target instead of action
+- [x] Update `MacRule` to support chain target instead of action
+- [x] Add chain rule comment generation for signatures
+- [x] Add validation for chain vs. action mutual exclusivity
+- [x] Enhance rule signature system to handle chain calls
+- [x] Add support for interface-based chain calls
+- [x] Update rule matching logic for chain-enabled rules
+
+### 6.3.4 Phase 6.4: Configuration Processing Enhancement
+- [x] Update `ConfigParser` to handle chain definitions
+- [x] Add chain definition parsing to `parseYamlFile`
+- [x] Update `IptablesManager::processConfiguration` to handle chains
+- [x] Add `processChainConfigurations` method to `IptablesManager`
+
+### 6.3.5 Phase 6.5: Command Execution Enhancement
+- [x] Add chain creation commands to `CommandExecutor`
+- [x] Update rule removal to handle chain cleanup
+- [x] Add error handling for chain operations
+- [x] Update logging for chain operations
+
+### 6.3.6 Phase 6.6: Integration and Workflow
+- [x] Update `IptablesManager` for chain support
+- [x] Add chain processing to configuration workflow
+- [x] Update rule removal workflow for chains
+- [x] Add validation for circular chain references
+
+## 6.4 Technical Implementation Details
+
+### 6.4.1 Chain Creation Strategy
+```bash
+# Chain creation sequence:
+iptables -N MAC_RULES_ETH1                              # Create custom chain
+iptables -A MAC_RULES_ETH1 -m mac --mac-source ... -j ACCEPT  # Add rules to chain
+iptables -A INPUT -i eth1 -j MAC_RULES_ETH1             # Call chain from main rule
+```
+
+### 6.4.2 Chain Signature System
+**Chain Definition Rules**:
+- Format: `YAML:chain:CHAIN_NAME:rule_type:details`
+- Example: `YAML:chain:MAC_RULES_ETH1:mac:00:11:22:33:44:55`
+
+**Chain Call Rules**:
+- Format: `YAML:section:chain_call:CHAIN_NAME:interface`
+- Example: `YAML:mac_filter:chain_call:MAC_RULES_ETH1:i:eth1`
+
+### 6.4.3 Dependency Resolution
+1. **Parse all chain definitions** from configuration
+2. **Extract chain references** from sections
+3. **Validate references** (ensure all referenced chains are defined)
+4. **Detect circular dependencies** in chain calls
+5. **Order chain creation** to satisfy dependencies
+6. **Create chains first**, then populate with rules
+7. **Add chain calls last** after all chains are ready
+
+### 6.4.4 Error Handling Strategy
+- **Missing chain definitions**: Error if section references undefined chain
+- **Circular dependencies**: Error if chains reference each other circularly
+- **Chain creation failures**: Detailed error reporting with recovery options
+- **Rule conflicts**: Validate that chain calls don't conflict with actions
+- **Chain cleanup**: Proper cleanup of created chains on failure
+
+### 6.4.5 Validation Enhancements
+```cpp
+class ChainValidator {
+public:
+    static std::vector<ValidationWarning> validateChainConfig(const Config& config);
+    static bool validateChainReferences(const Config& config);
+    static bool detectCircularDependencies(const Config& config);
+    static std::vector<std::string> getChainCreationOrder(const Config& config);
+    
+private:
+    static void buildDependencyGraph(const Config& config, 
+                                   std::map<std::string, std::set<std::string>>& graph);
+    static bool hasCycle(const std::map<std::string, std::set<std::string>>& graph);
+};
+```
+
+## 6.5 Configuration Examples
+
+### 6.5.1 Basic Chain Definition and Usage
+```yaml
+# Section with chain call
+web_filter:
+  interface:
+    input: "eth0"
+    chain: web_security_chain
+
+# Chain definition
+web_security_chain:
+  chain:
+    - name: "WEB_SECURITY_CHAIN"
+      action: accept
+      rules:
+        allowed_ips:
+          ports:
+            - port: 80
+              subnet: ["192.168.1.0/24"]
+              allow: true
+        blocked_ips:
+          ports:
+            - port: 80
+              subnet: ["10.0.0.0/8"]
+              allow: false
+```
+
+### 6.5.2 Complex Multi-Chain Configuration
+```yaml
+# Main security filtering
+security_filter:
+  interface:
+    input: "eth0"
+    chain: main_security_chain
+
+# SSH access control
+ssh_filter:
+  interface:
+    input: "any"
+    chain: ssh_access_chain
+
+# Main security chain
+main_security_chain:
+  chain:
+    - name: "MAIN_SECURITY_CHAIN"
+      action: drop
+      rules:
+        web_traffic:
+          ports:
+            - port: 80
+              allow: true
+            - port: 443
+              allow: true
+        call_ssh_check:
+          interface:
+            chain: ssh_access_chain
+
+# SSH access chain
+ssh_access_chain:
+  chain:
+    - name: "SSH_ACCESS_CHAIN"
+      action: drop
+      rules:
+        admin_access:
+          ports:
+            - port: 22
+              subnet: ["192.168.1.0/24"]
+              allow: true
+```
+
+### 6.5.3 Advanced Chain Organization
+```
