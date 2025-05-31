@@ -6,13 +6,16 @@ A C++ implementation of iptables-compose, providing a structured way to manage i
 
 - **YAML Configuration**: Define iptables rules using human-readable YAML files
 - **Rule Types**: Support for TCP, UDP, and MAC-based rules
+- **Multiport Support**: Configure multiple ports and port ranges efficiently using iptables multiport extension
 - **Rule Management**: Automatic rule identification with comments for easy management
+- **Rule Order Validation**: Intelligent analysis to detect unreachable and redundant rules
 - **Policy Management**: Control INPUT, OUTPUT, and FORWARD chain policies
 - **Port Forwarding**: Built-in support for NAT-based port forwarding
 - **Interface Rules**: Interface-specific rule configuration
 - **Subnet Filtering**: Network-based access control
 - **MAC Filtering**: Hardware address-based filtering
 - **Safe Operations**: Rules are replaced atomically to prevent conflicts
+- **Debug Mode**: Configuration validation without applying changes
 
 ## 🛠️ Installation
 
@@ -103,6 +106,12 @@ web:
       protocol: tcp
       direction: input
       allow: true
+    - range:
+        - "8000-8100"
+        - "9000-9100"
+      protocol: tcp
+      direction: input
+      allow: true
 
 ssh:
   ports:
@@ -168,29 +177,32 @@ iptables-compose-cpp/
 ├── 📄 install_dependencies.sh # Dependency installer
 ├── 📁 include/                # Header files
 │   ├── cli_parser.hpp         # Command line argument parsing
-│   ├── config.hpp             # Configuration structures
+│   ├── config.hpp             # Configuration structures (with multiport support)
 │   ├── config_parser.hpp      # YAML configuration parser
 │   ├── command_executor.hpp   # Iptables command execution
 │   ├── iptables_manager.hpp   # Main iptables interface
 │   ├── rule.hpp              # Base rule class
-│   ├── tcp_rule.hpp          # TCP rule implementation
-│   ├── udp_rule.hpp          # UDP rule implementation
+│   ├── tcp_rule.hpp          # TCP rule implementation (with multiport)
+│   ├── udp_rule.hpp          # UDP rule implementation (with multiport)
 │   ├── mac_rule.hpp          # MAC rule implementation
 │   ├── rule_manager.hpp      # Rule collection management
+│   ├── rule_validator.hpp    # Rule order validation and conflict detection
 │   └── system_utils.hpp     # System utilities
 ├── 📁 src/                   # Source files
 │   ├── main.cpp             # Application entry point
 │   ├── cli_parser.cpp       # CLI parsing implementation
-│   ├── config.cpp           # Configuration handling
+│   ├── config.cpp           # Configuration handling (with multiport validation)
 │   ├── config_parser.cpp    # YAML parsing logic
 │   ├── command_executor.cpp # Command execution engine
-│   ├── iptables_manager.cpp # Main business logic
+│   ├── iptables_manager.cpp # Main business logic (with multiport processing)
 │   ├── rule_manager.cpp     # Rule management
-│   ├── tcp_rule.cpp        # TCP rule logic
-│   ├── udp_rule.cpp        # UDP rule logic
+│   ├── rule_validator.cpp   # Rule validation implementation
+│   ├── tcp_rule.cpp        # TCP rule logic (with multiport support)
+│   ├── udp_rule.cpp        # UDP rule logic (with multiport support)
 │   ├── mac_rule.cpp        # MAC rule logic
 │   └── system_utils.cpp    # System interaction
 ├── 📄 example.yaml         # Example configuration
+├── 📄 test_multiport.yaml  # Multiport configuration examples
 ├── 📄 IMPLEMENT.md         # Implementation documentation
 └── 📄 LICENSE              # MIT License
 ```
@@ -223,6 +235,19 @@ section_name:
       interface:
         input: eth0             # Input interface (optional)
         output: eth1            # Output interface (optional)
+    
+    - range:
+        - "1000-2000"
+        - "3000-4000"
+        - "8080-8090"
+      protocol: tcp|udp
+      direction: input|output|forward
+      allow: true|false
+      subnet: ["10.0.0.0/8"]
+      mac-source: "aa:bb:cc:dd:ee:ff"
+      interface:
+        input: eth0
+        output: eth1
   
   mac:
     - mac-source: "aa:bb:cc:dd:ee:ff"  # MAC address (required)
@@ -233,10 +258,66 @@ section_name:
         input: eth0             # Input interface (optional)
 ```
 
+### Multiport Configuration Examples
+
+```yaml
+# Example 1: Web services with multiple port ranges
+web_services:
+  ports:
+    - port: 80
+      allow: true
+    - port: 443
+      allow: true
+    - range:
+        - "3000-3010"
+        - "8000-8010"
+        - "9000-9010"
+      allow: true
+      subnet: ["192.168.1.0/24"]
+
+# Example 2: Database services
+database_services:
+  ports:
+    - range:
+        - "3306-3309"
+        - "5432-5435"
+        - "27017-27019"
+      allow: true
+      subnet: ["10.0.0.0/8"]
+      interface:
+        input: eth1
+
+# Example 3: Gaming servers
+game_servers:
+  ports:
+    - range:
+        - "7777-7787"
+        - "25565-25575"
+      protocol: tcp
+      allow: true
+    - range:
+        - "7777-7787"
+      protocol: udp
+      allow: true
+```
+
+### Generated iptables Commands
+
+The multiport implementation generates optimized iptables commands:
+
+```bash
+iptables -A INPUT -p tcp -m tcp --dport 22 -j ACCEPT
+iptables -A INPUT -p tcp -m multiport --dports 1000:2000,3000:4000,8080:8090 -j ACCEPT
+iptables -A INPUT -p tcp -m multiport --dports 3306:3309,5432:5435 -s 10.0.0.0/8 -i eth1 -j ACCEPT
+```
+
 ## 🔒 Security Considerations
 
 - **Root Privileges**: This tool requires root access to modify iptables rules
-- **Rule Validation**: All rules are validated before application
+- **Rule Validation**: All rules are validated before application, including multiport syntax
+- **Mutual Exclusivity**: Port and range fields are mutually exclusive to prevent configuration errors
+- **Port Range Limits**: iptables multiport extension supports up to 15 port specifications per rule
+- **Port Forwarding Restriction**: Port ranges cannot be used with port forwarding (iptables limitation)
 - **Atomic Operations**: Rules are replaced atomically to prevent security gaps
 - **Comment-based Management**: Rules are tracked using comments for safe removal
 
@@ -248,13 +329,20 @@ section_name:
 2. **iptables not found**: Install iptables package for your distribution
 3. **Build Errors**: Check that all dependencies are installed
 4. **YAML Parse Errors**: Validate your YAML syntax and structure
+5. **Multiport Errors**:
+   - Ensure port ranges don't exceed 15 specifications per rule
+   - Verify range format is "start-end" (e.g., "1000-2000")
+   - Don't use both `port` and `range` in the same rule
+   - Port forwarding not supported with ranges
 
 ### Debug Mode
 
-Enable verbose logging by setting the log level in the CommandExecutor:
-```cpp
-CommandExecutor::setLogLevel(LogLevel::Debug);
+Enable validation without applying rules:
+```bash
+./iptables-compose-cpp --debug config.yaml
 ```
+
+This will validate your configuration, including multiport syntax, without modifying iptables.
 
 ## 🤝 Contributing
 

@@ -7,9 +7,28 @@ namespace iptables {
 
 // PortConfig implementation
 bool PortConfig::isValid() const {
-    if (port < 1 || port > 65535) {
+    // Exactly one of port or range must be specified
+    if (!port.has_value() && !range.has_value()) {
         return false;
     }
+    if (port.has_value() && range.has_value()) {
+        return false;
+    }
+    
+    // Validate single port
+    if (port.has_value() && (*port < 1 || *port > 65535)) {
+        return false;
+    }
+    
+    // Validate port ranges
+    if (range.has_value()) {
+        for (const auto& range_str : *range) {
+            if (!isValidPortRange(range_str)) {
+                return false;
+            }
+        }
+    }
+    
     if (forward && (*forward < 1 || *forward > 65535)) {
         return false;
     }
@@ -17,13 +36,50 @@ bool PortConfig::isValid() const {
 }
 
 std::string PortConfig::getErrorMessage() const {
-    if (port < 1 || port > 65535) {
+    if (!port.has_value() && !range.has_value()) {
+        return "Either 'port' or 'range' must be specified";
+    }
+    if (port.has_value() && range.has_value()) {
+        return "Cannot specify both 'port' and 'range' - they are mutually exclusive";
+    }
+    if (port.has_value() && (*port < 1 || *port > 65535)) {
         return "Port must be between 1-65535";
+    }
+    if (range.has_value()) {
+        for (const auto& range_str : *range) {
+            if (!isValidPortRange(range_str)) {
+                return "Invalid port range format: " + range_str + " (expected format: 'start-end', e.g., '1000-2000')";
+            }
+        }
     }
     if (forward && (*forward < 1 || *forward > 65535)) {
         return "Forward port must be between 1-65535";
     }
     return "";
+}
+
+// Helper function to validate port range format
+bool PortConfig::isValidPortRange(const std::string& range_str) const {
+    size_t dash_pos = range_str.find('-');
+    if (dash_pos == std::string::npos) {
+        return false;
+    }
+    
+    try {
+        uint16_t start = std::stoul(range_str.substr(0, dash_pos));
+        uint16_t end = std::stoul(range_str.substr(dash_pos + 1));
+        
+        if (start < 1 || start > 65535 || end < 1 || end > 65535) {
+            return false;
+        }
+        if (start >= end) {
+            return false;
+        }
+        
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
 }
 
 // MacConfig implementation
@@ -325,7 +381,13 @@ bool convert<InterfaceConfig>::decode(const Node& node, InterfaceConfig& interfa
 // PortConfig conversion
 YAML::Node convert<PortConfig>::encode(const PortConfig& config) {
     Node node;
-    node["port"] = config.port;
+    
+    if (config.port) {
+        node["port"] = *config.port;
+    }
+    if (config.range) {
+        node["range"] = *config.range;
+    }
     
     if (config.protocol != Protocol::Tcp) {
         node["protocol"] = config.protocol;
@@ -355,8 +417,23 @@ YAML::Node convert<PortConfig>::encode(const PortConfig& config) {
 bool convert<PortConfig>::decode(const Node& node, PortConfig& config) {
     if (!node.IsMap()) return false;
     
-    if (!node["port"]) return false;
-    config.port = node["port"].as<uint16_t>();
+    // Check for port or range (mutually exclusive)
+    bool has_port = node["port"].IsDefined();
+    bool has_range = node["range"].IsDefined();
+    
+    if (!has_port && !has_range) {
+        return false; // Must have either port or range
+    }
+    if (has_port && has_range) {
+        return false; // Cannot have both
+    }
+    
+    if (has_port) {
+        config.port = node["port"].as<uint16_t>();
+    }
+    if (has_range) {
+        config.range = node["range"].as<std::vector<std::string>>();
+    }
     
     if (node["protocol"]) {
         config.protocol = node["protocol"].as<Protocol>();

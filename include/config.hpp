@@ -18,7 +18,8 @@ enum class Policy {
 
 // Port configuration matching Rust PortConfig
 struct PortConfig {
-    uint16_t port;
+    std::optional<uint16_t> port;  // Single port (mutually exclusive with range)
+    std::optional<std::vector<std::string>> range;  // Port ranges like ["1000-2000", "3000-4000"]
     Protocol protocol = Protocol::Tcp;
     Direction direction = Direction::Input;
     std::optional<std::vector<std::string>> subnet;
@@ -29,6 +30,9 @@ struct PortConfig {
 
     bool isValid() const;
     std::string getErrorMessage() const;
+
+private:
+    bool isValidPortRange(const std::string& range_str) const;
 };
 
 // MAC configuration matching Rust MacConfig

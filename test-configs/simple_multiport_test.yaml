@@ -1,0 +1,20 @@
+# Simple multiport test
+filter:
+  input: accept
+  output: accept
+  forward: accept
+
+# Test single port
+single_port_test:
+  ports:
+    - port: 22
+      allow: true
+
+# Test multiport ranges
+multiport_test:
+  ports:
+    - range: 
+        - "80-90"
+        - "443-453"
+      allow: true
+      protocol: tcp 

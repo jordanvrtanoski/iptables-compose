@@ -14,7 +14,8 @@ struct RuleSelectivity {
     std::optional<std::vector<std::string>> subnets;  // More specific subnets = more selective
     
     // Port selectivity  
-    std::optional<int> port;                     // Specific port = more selective
+    std::optional<int> port;                          // Specific single port = more selective
+    std::optional<std::vector<std::string>> port_ranges; // Port ranges using multiport
     Protocol protocol;                                // Specific protocol = more selective
     
     // Interface selectivity

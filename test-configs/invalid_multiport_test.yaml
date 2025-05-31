@@ -1,0 +1,25 @@
+# Invalid multiport test - should fail validation
+filter:
+  input: accept
+
+# Test invalid: both port and range specified
+invalid_both:
+  ports:
+    - port: 22
+      range:
+        - "80-90"
+      allow: true
+
+# Test invalid: neither port nor range specified  
+invalid_neither:
+  ports:
+    - allow: true
+      protocol: tcp
+
+# Test invalid: bad range format
+invalid_range:
+  ports:
+    - range:
+        - "80-70"  # start > end
+        - "abc-def"  # non-numeric
+      allow: true 

@@ -207,12 +207,19 @@ RuleSelectivity RuleValidator::extractPortSelectivity(const PortConfig& port, co
     RuleSelectivity selectivity;
     
     selectivity.subnets = port.subnet;
-    selectivity.port = port.port;
     selectivity.protocol = port.protocol;
     selectivity.mac_source = port.mac_source;
     selectivity.allow = port.allow;
     selectivity.section_name = section;
     selectivity.rule_index = index;
+    
+    // Handle single port or port ranges
+    if (port.port) {
+        selectivity.port = static_cast<int>(*port.port);
+    }
+    if (port.range) {
+        selectivity.port_ranges = port.range;
+    }
     
     if (port.interface) {
         selectivity.input_interface = port.interface->input;
@@ -220,7 +227,18 @@ RuleSelectivity RuleValidator::extractPortSelectivity(const PortConfig& port, co
     }
     
     std::ostringstream desc;
-    desc << "port " << port.port << " (" << (port.protocol == Protocol::Tcp ? "TCP" : "UDP") << ")";
+    if (port.port) {
+        desc << "port " << *port.port;
+    } else if (port.range) {
+        desc << "port ranges [";
+        for (size_t i = 0; i < port.range->size(); ++i) {
+            if (i > 0) desc << ", ";
+            desc << (*port.range)[i];
+        }
+        desc << "]";
+    }
+    desc << " (" << (port.protocol == Protocol::Tcp ? "TCP" : "UDP") << ")";
+    
     if (port.subnet) {
         desc << " from subnets: ";
         for (size_t i = 0; i < port.subnet->size(); ++i) {

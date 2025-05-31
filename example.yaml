@@ -15,6 +15,13 @@ ssh:
     - port: 22
       allow: true
 
+vscode:
+  ports:
+    - range: 
+      - "1000-2000"
+      - "3000-4000"
+      allow: true
+      
 web:
   ports:
     - port: 80

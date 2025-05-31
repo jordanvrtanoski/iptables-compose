@@ -253,7 +253,31 @@ bool IptablesManager::processFilterConfig(const FilterConfig& filter) {
 
 bool IptablesManager::processPortConfig(const PortConfig& port, const std::string& section_name) {
     std::cout << "Processing port configuration for section: " << section_name << std::endl;
-    std::cout << "  Port: " << port.port << std::endl;
+    
+    // Handle single port or multiport
+    std::string port_description;
+    if (port.port) {
+        std::cout << "  Single port: " << *port.port << std::endl;
+        port_description = std::to_string(*port.port);
+    } else if (port.range) {
+        std::cout << "  Port ranges: ";
+        for (const auto& range_str : *port.range) {
+            std::cout << range_str << " ";
+        }
+        std::cout << std::endl;
+        
+        // Create comma-separated list for multiport
+        std::ostringstream range_list;
+        for (size_t i = 0; i < port.range->size(); ++i) {
+            if (i > 0) range_list << ",";
+            range_list << (*port.range)[i];
+        }
+        port_description = "multiport:" + range_list.str();
+    } else {
+        std::cerr << "Invalid port configuration: neither port nor range specified" << std::endl;
+        return false;
+    }
+    
     std::cout << "  Direction: " << static_cast<int>(port.direction) << std::endl;
     std::cout << "  Allow: " << (port.allow ? "true" : "false") << std::endl;
     std::cout << "  Protocol: " << static_cast<int>(port.protocol) << std::endl;
@@ -281,6 +305,12 @@ bool IptablesManager::processPortConfig(const PortConfig& port, const std::strin
     
     if (port.forward) {
         std::cout << "  Forward port: " << *port.forward << std::endl;
+        
+        // Port forwarding only works with single ports, not ranges
+        if (port.range) {
+            std::cerr << "Port forwarding is not supported with port ranges" << std::endl;
+            return false;
+        }
     }
     
     // Generate rule comment
@@ -289,7 +319,7 @@ bool IptablesManager::processPortConfig(const PortConfig& port, const std::strin
     
     if (port.forward) {
         // Handle port forwarding in NAT table
-        std::string comment = "YAML:" + section_name + ":port:" + std::to_string(port.port) + ":forward:" + iface_comment + ":mac:" + mac_comment;
+        std::string comment = "YAML:" + section_name + ":port:" + port_description + ":forward:" + iface_comment + ":mac:" + mac_comment;
         
         // Remove existing rules with this signature
         removeRulesBySignature("nat", "PREROUTING", comment);
@@ -322,7 +352,7 @@ bool IptablesManager::processPortConfig(const PortConfig& port, const std::strin
         args.insert(args.end(), {
             "-p", protocol_str,
             "-m", protocol_str,
-            "--dport", std::to_string(port.port),
+            "--dport", std::to_string(*port.port),
             "-m", "comment",
             "--comment", comment,
             "-j", "REDIRECT",
@@ -337,7 +367,7 @@ bool IptablesManager::processPortConfig(const PortConfig& port, const std::strin
         
     } else {
         // Handle regular rules in the specified chain
-        std::string comment = "YAML:" + section_name + ":port:" + std::to_string(port.port) + ":" + iface_comment + ":mac:" + mac_comment;
+        std::string comment = "YAML:" + section_name + ":port:" + port_description + ":" + iface_comment + ":mac:" + mac_comment;
         
         // Convert direction to chain name
         std::string chain;
@@ -390,12 +420,28 @@ bool IptablesManager::processPortConfig(const PortConfig& port, const std::strin
             args.push_back(subnet_list.str());
         }
         
-        // Add protocol and port
+        // Add protocol and port specification
         std::string protocol_str = (port.protocol == Protocol::Tcp) ? "tcp" : "udp";
+        args.insert(args.end(), {"-p", protocol_str});
+        
+        if (port.port) {
+            // Single port
+            args.insert(args.end(), {"-m", protocol_str, "--dport", std::to_string(*port.port)});
+        } else if (port.range) {
+            // Multiple port ranges using multiport extension
+            args.insert(args.end(), {"-m", "multiport", "--dports"});
+            
+            // Build comma-separated list of port ranges
+            std::ostringstream port_list;
+            for (size_t i = 0; i < port.range->size(); ++i) {
+                if (i > 0) port_list << ",";
+                port_list << (*port.range)[i];
+            }
+            args.push_back(port_list.str());
+        }
+        
+        // Add comment and action
         args.insert(args.end(), {
-            "-p", protocol_str,
-            "-m", protocol_str,
-            "--dport", std::to_string(port.port),
             "-m", "comment",
             "--comment", comment,
             "-j", port.allow ? "ACCEPT" : "DROP"

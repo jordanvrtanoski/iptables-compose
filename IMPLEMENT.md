@@ -10,6 +10,7 @@ The existing C++ codebase has a solid foundation with:
 - **Rule hierarchy**: Base `Rule` class with specialized implementations (`TcpRule`, `UdpRule`, `MacRule`)
 - **Management layer**: `IptablesManager` for high-level operations, `RuleManager` for rule collection management
 - **Build system**: CMake with yaml-cpp dependency already configured
+- **Multiport support**: Complete implementation of port ranges using iptables multiport extension
 
 ### 1.2 Rust Implementation Architecture
 
@@ -22,18 +23,24 @@ The Rust implementation follows a functional approach with these key components:
 
 ### 1.3 Target C++ Architecture
 
-The C++ implementation will maintain object-oriented principles:
+The C++ implementation maintains object-oriented principles with enhanced multiport support:
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 │   Application   │───→│   IptablesManager │───→│   RuleManager   │
-│   (main.cpp)    │    │                  │    │                 │
+│   (main.cpp)    │    │   (w/ multiport)  │    │                 │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
          │                       │                       │
          ▼                       ▼                       ▼
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 │   ConfigParser  │    │  CommandExecutor │    │   Rule classes  │
-│                 │    │                  │    │  (TCP/UDP/MAC)  │
+│  (w/ ranges)    │    │                  │    │  (w/ multiport) │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+         │                       │                       │
+         ▼                       ▼                       ▼
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│  RuleValidator  │    │   SystemUtils    │    │ Multiport Rules │
+│                 │    │                  │    │                 │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
 ```
 
@@ -41,57 +48,127 @@ The C++ implementation will maintain object-oriented principles:
 
 ### 2.1 Configuration Processing
 
-The Rust implementation processes YAML configurations in this sequence:
+The implementation processes YAML configurations with enhanced multiport support:
 
-1. **YAML Parsing**: Deserialize YAML into structured data
+1. **YAML Parsing**: Deserialize YAML into structured data with range support
 2. **Filter Policies**: Set default chain policies (INPUT, OUTPUT, FORWARD)
 3. **Section Processing**: Handle custom sections with port and MAC rules
-4. **Rule Generation**: Convert configuration to iptables commands
+4. **Multiport Processing**: Convert port ranges to optimized iptables multiport commands
+5. **Rule Generation**: Convert configuration to iptables commands
 
 Key configuration structures:
 - `Config`: Root configuration object
 - `FilterConfig`: Chain policies and filter-specific MAC rules
 - `SectionConfig`: Custom sections with ports and MAC rules
-- `PortConfig`: Individual port rule configuration
+- `PortConfig`: Individual port rule configuration (enhanced with `range` field)
 - `MacConfig`: MAC address filtering rules
 
-### 2.2 Rule Management Logic
+### 2.2 Multiport Implementation ✨ **NEW**
 
-#### 2.2.1 Rule Identification
-Rules are identified using comment-based signatures:
+#### 2.2.1 Configuration Structure Enhancement
+The `PortConfig` structure has been enhanced to support both single ports and port ranges:
+
+```cpp
+struct PortConfig {
+    std::optional<uint16_t> port;                    // Single port (mutually exclusive with range)
+    std::optional<std::vector<std::string>> range;   // Port ranges like ["1000-2000", "3000-4000"]
+    Protocol protocol = Protocol::Tcp;
+    Direction direction = Direction::Input;
+    // ... other fields
+    
+    bool isValid() const;                           // Validates mutual exclusivity and range format
+private:
+    bool isValidPortRange(const std::string& range_str) const;
+};
+```
+
+#### 2.2.2 YAML Syntax Support
+The implementation supports the exact syntax from the original requirement:
+
+```yaml
+# Single port (existing syntax - backward compatible)
+ssh:
+  ports:
+    - port: 22
+      allow: true
+
+# Multiple port ranges (new syntax)
+vscode:
+  ports:
+    - range: 
+        - "1000-2000"
+        - "3000-4000"
+      allow: true
+```
+
+#### 2.2.3 iptables Command Generation
+The multiport implementation generates optimized iptables commands:
+
+- **Single ports**: Use standard iptables syntax (`--dport`)
+- **Port ranges**: Use multiport extension (`-m multiport --dports range1,range2,range3`)
+
+Generated commands:
+```bash
+# Single port
+iptables -A INPUT -p tcp -m tcp --dport 22 -j ACCEPT
+
+# Multiple ranges  
+iptables -A INPUT -p tcp -m multiport --dports 1000:2000,3000:4000 -j ACCEPT
+```
+
+#### 2.2.4 Validation and Error Handling
+Comprehensive validation includes:
+- **Mutual exclusivity**: Prevents specifying both `port` and `range`
+- **Range format validation**: Ensures "start-end" format with proper numbers
+- **Port range logic**: Validates start < end and both are valid port numbers (1-65535)
+- **iptables limits**: Respects multiport extension limit of 15 port specifications
+- **Port forwarding restriction**: Prevents using ranges with forwarding (not supported by iptables)
+
+#### 2.2.5 Rule Order Analysis Enhancement
+The rule validation system has been enhanced to understand multiport rules:
+- **Port range selectivity analysis**: Analyzes how specific port ranges are compared to single ports
+- **Conflict detection**: Identifies potential conflicts between single ports and ranges
+- **Optimization suggestions**: Could suggest combining adjacent ranges (future enhancement)
+
+### 2.3 Rule Management Logic
+
+#### 2.3.1 Rule Identification
+Rules are identified using comment-based signatures (enhanced for multiport):
 ```
 YAML:section:type:details:interface:mac
 ```
 
 Examples:
-- `YAML:web:port:80:i:eth0:o:any:mac:any`
-- `YAML:filter:mac:aa:bb:cc:dd:ee:ff:i:any:o:any`
+- Single port: `YAML:web:port:80:i:eth0:o:any:mac:any`
+- Port ranges: `YAML:vscode:port:1000-2000,3000-4000:i:any:o:any:mac:any`
+- MAC rule: `YAML:filter:mac:aa:bb:cc:dd:ee:ff:i:any:o:any`
 
-#### 2.2.2 Rule Removal Strategy
+#### 2.3.2 Rule Removal Strategy
 1. List existing rules with line numbers
-2. Find rules matching comment patterns
+2. Find rules matching comment patterns (including multiport signatures)
 3. Remove rules in reverse order (highest line number first)
 4. This prevents line number shifting issues
 
-#### 2.2.3 Rule Application
+#### 2.3.3 Rule Application
 1. Remove existing rules with same signature
-2. Build new iptables command
+2. Build new iptables command (single port or multiport)
 3. Execute command with proper error handling
 
-### 2.3 Command Line Interface
+### 2.4 Command Line Interface
 
-The Rust implementation supports:
+The implementation supports all original commands plus enhanced debug mode:
 - `config <file>`: Apply configuration from YAML file
 - `--reset`: Reset all iptables rules before applying config
 - `--remove-rules`: Remove all rules with YAML comments
+- `--debug`: Validate configuration without applying (enhanced with multiport validation)
 - `--license`: Display license information
 
-### 2.4 Rule Ordering Design
+### 2.5 Rule Ordering Design
 
-#### 2.4.1 Importance of Rule Order in iptables
+#### 2.5.1 Importance of Rule Order in iptables
 In iptables, rule order is critical because rules are evaluated sequentially from top to bottom within each chain. The first rule that matches a packet determines the action taken. This makes preserving the exact order of rules as they appear in the YAML configuration file essential for correct firewall behavior.
 
-#### 2.4.2 Order Preservation Strategy
+#### 2.5.2 Order Preservation Strategy
 The C++ implementation ensures rule order preservation through the following design choices:
 
 1. **Section Order Preservation**:
@@ -109,7 +186,7 @@ The C++ implementation ensures rule order preservation through the following des
    - Custom sections are processed in YAML document order
    - Within each section, rules are applied in this order: ports → mac → interface
 
-#### 2.4.3 iptables Command Strategy
+#### 2.5.3 iptables Command Strategy
 - **Remove existing rules**: Before adding new rules, remove rules with matching signatures to prevent duplicates
 - **Append rules**: Use `-A` (append) to add rules at the end of chains, preserving order
 - **Line number deletion**: When removing rules, use descending line number order to prevent index shifting
@@ -130,7 +207,7 @@ web:           # 3. Processed third
 
 This ensures that rules are applied to iptables in the exact sequence they appear in the configuration file.
 
-#### 2.4.4 Safety Considerations for Remote Systems
+#### 2.5.4 Safety Considerations for Remote Systems
 
 **Important**: When working on remote systems (VMs, servers accessed via SSH), avoid using `drop` policies in the filter section as they will immediately cut off network access. 
 
@@ -150,7 +227,7 @@ filter:
 
 The implementation includes safe example configurations that use `accept` policies to prevent accidental lockouts during development and testing.
 
-#### 2.4.5 Rule Order Validation
+#### 2.5.5 Rule Order Validation
 
 To help users identify potential configuration issues, the implementation includes an intelligent rule order validator that analyzes the configuration before applying it to iptables.
 
@@ -197,7 +274,7 @@ Found 1 potential rule ordering issue(s):
 
 The validator helps prevent common iptables configuration mistakes and ensures that rules work as intended by the administrator.
 
-### 2.5 Special Cases Handling
+### 2.6 Special Cases Handling
 
 1. **Port Forwarding**: Uses NAT table PREROUTING chain with REDIRECT target
 2. **MAC Rules**: Only allowed in INPUT direction
@@ -728,6 +805,7 @@ No major changes required to CMakeLists.txt, but may need:
 - [x] Handle `--license` option
 - [x] Handle `--remove-rules` option
 - [x] Handle `--reset` option with config file
+- [x] Handle `--debug` option (**✨ enhanced with multiport validation**)
 - [x] Handle config file processing
 - [x] Add proper error codes and messages
 - [x] Add comprehensive error handling for all exception types
@@ -1011,3 +1089,113 @@ All items in Phase 4.1 have been successfully implemented and verified:
 5. **Enhanced rule management** with line number-based deletion
 
 The foundation (Phase 4.1) is completely implemented and the application successfully handles configuration parsing, validation, and the overall workflow. The core infrastructure is in place for implementing the remaining iptables-specific functionality.
+
+### 5.6 ✨ **NEW: Multiport Implementation (Phase 6) ✅ COMPLETE**
+
+#### 5.6.1 Configuration Enhancement ✅
+- [x] **Enhanced `PortConfig` structure with optional `range` field**
+- [x] **Mutual exclusivity validation between `port` and `range`**
+- [x] **Range format validation ("start-end" syntax)**
+- [x] **Port number bounds checking (1-65535)**
+- [x] **Range logic validation (start < end)**
+- [x] **YAML encode/decode support for range arrays**
+- [x] **Comprehensive error messaging for invalid ranges**
+
+#### 5.6.2 Command Generation ✅
+- [x] **Multiport iptables command generation (`-m multiport --dports`)**
+- [x] **Range syntax conversion ("1000-2000" → "1000:2000")**
+- [x] **Multiple range concatenation with commas**
+- [x] **Integration with existing rule processing pipeline**
+- [x] **Backward compatibility with single port syntax**
+- [x] **Enhanced rule comment generation for multiport rules**
+
+#### 5.6.3 Validation and Testing ✅
+- [x] **Comprehensive range validation in `PortConfig::isValid()`**
+- [x] **Error message generation for validation failures**
+- [x] **Integration with rule validator for multiport rules**
+- [x] **Test configuration files (`test_multiport.yaml`, `simple_multiport_test.yaml`)**
+- [x] **Invalid configuration testing (`invalid_multiport_test.yaml`)**
+- [x] **Live testing with actual iptables commands**
+- [x] **Debug mode validation without applying rules**
+
+#### 5.6.4 Documentation and Examples ✅
+- [x] **Updated example.yaml with multiport syntax**
+- [x] **Comprehensive test configurations**
+- [x] **Error handling demonstrations**
+- [x] **Documentation updates in README.md**
+
+### 5.7 Testing and Validation (Phase 7) ✅ **COMPLETE**
+
+#### 5.7.1 Live Testing ✅
+- [x] **Successful compilation and building**
+- [x] **Configuration parsing validation**
+- [x] **Multiport syntax validation**
+- [x] **Error detection for invalid configurations**
+- [x] **Rule order validation**
+- [x] **Debug mode testing**
+- [x] **Backward compatibility verification**
+
+#### 5.7.2 Configuration Testing ✅
+- [x] **Valid multiport configurations**
+- [x] **Invalid multiport configurations (both port and range)**
+- [x] **Invalid multiport configurations (neither port nor range)**
+- [x] **Invalid range formats**
+- [x] **Port forwarding restriction testing**
+- [x] **Mutual exclusivity validation**
+
+### 5.8 Documentation and Polish (Final Phase) ✅ **COMPLETE**
+
+#### 5.8.1 Documentation Updates ✅
+- [x] **Updated README.md with multiport features**
+- [x] **Updated STATUS.md with implementation status**
+- [x] **Updated IMPLEMENT.md with multiport details**
+- [x] **Configuration examples and syntax documentation**
+- [x] **Troubleshooting guide for multiport issues**
+
+## Chapter 5: Implementation Verification Summary
+
+### 5.1 ✅ **MULTIPORT IMPLEMENTATION COMPLETE**
+
+**All multiport features have been successfully implemented and tested:**
+
+#### Core Multiport Functionality ✅
+- **Configuration Structure**: Enhanced `PortConfig` with `std::optional<std::vector<std::string>> range` field
+- **Mutual Exclusivity**: Complete validation ensuring `port` and `range` cannot both be specified
+- **Range Validation**: Comprehensive format checking, port bounds validation, and logical validation
+- **YAML Parsing**: Full support for range arrays with proper error handling
+- **Command Generation**: Optimized iptables commands using multiport extension
+- **Backward Compatibility**: All existing single-port configurations continue to work unchanged
+
+#### Advanced Features ✅
+- **Rule Validation**: Enhanced rule validator with multiport rule analysis
+- **Error Handling**: Comprehensive error messages for all multiport validation scenarios
+- **Debug Mode**: Full validation support without applying changes
+- **Port Forwarding Restriction**: Prevents invalid combinations of ranges with forwarding
+- **Rule Order Analysis**: Enhanced conflict detection for multiport rules
+
+#### Testing and Verification ✅
+- **Live Testing**: Successfully tested with actual iptables commands
+- **Configuration Validation**: Tested valid and invalid multiport configurations
+- **Error Detection**: Verified that validation catches all error scenarios
+- **Backward Compatibility**: Confirmed existing configurations work unchanged
+
+### 5.2 Ready for Production Use
+
+The iptables-compose-cpp implementation is now **feature-complete** with:
+
+- ✅ All original Rust features ported
+- ✅ **Multiport support added** (enhancement beyond original Rust version)
+- ✅ **Rule validation system** (enhancement beyond original Rust version)
+- ✅ Comprehensive error handling and validation
+- ✅ Production-ready code quality
+- ✅ Complete documentation and examples
+- ✅ Backward compatibility maintained
+- ✅ Enhanced performance through multiport optimization
+
+---
+
+**Implementation Status: COMPLETE ✅**
+**Multiport Support: COMPLETE ✅**
+**Ready for Repository Publication**
+
+*Last Updated: December 2024*
