@@ -255,14 +255,47 @@ bool convert<Protocol>::decode(const Node& node, Protocol& protocol) {
     if (!node.IsScalar()) return false;
     
     std::string value = node.as<std::string>();
+    std::transform(value.begin(), value.end(), value.begin(), ::tolower);
+    
     if (value == "tcp") {
         protocol = Protocol::Tcp;
+        return true;
     } else if (value == "udp") {
         protocol = Protocol::Udp;
-    } else {
-        return false;
+        return true;
     }
-    return true;
+    
+    return false;
+}
+
+// Action conversion
+YAML::Node convert<Action>::encode(const Action& action) {
+    switch (action) {
+        case Action::Accept: return Node("accept");
+        case Action::Drop: return Node("drop");
+        case Action::Reject: return Node("reject");
+        default: return Node("accept");
+    }
+}
+
+bool convert<Action>::decode(const Node& node, Action& action) {
+    if (!node.IsScalar()) return false;
+    
+    std::string value = node.as<std::string>();
+    std::transform(value.begin(), value.end(), value.begin(), ::tolower);
+    
+    if (value == "accept" || value == "allow") {
+        action = Action::Accept;
+        return true;
+    } else if (value == "drop" || value == "deny") {
+        action = Action::Drop;
+        return true;
+    } else if (value == "reject") {
+        action = Action::Reject;
+        return true;
+    }
+    
+    return false;
 }
 
 // InterfaceConfig conversion
@@ -490,6 +523,9 @@ YAML::Node convert<SectionConfig>::encode(const SectionConfig& config) {
     if (config.interface) {
         node["interface"] = *config.interface;
     }
+    if (config.action) {
+        node["action"] = *config.action;
+    }
     
     return node;
 }
@@ -505,6 +541,9 @@ bool convert<SectionConfig>::decode(const Node& node, SectionConfig& config) {
     }
     if (node["interface"]) {
         config.interface = node["interface"].as<std::vector<InterfaceRuleConfig>>();
+    }
+    if (node["action"]) {
+        config.action = node["action"].as<Action>();
     }
     
     return true;

@@ -34,6 +34,7 @@ private:
     bool processPortConfig(const PortConfig& port, const std::string& section_name);
     bool processMacConfig(const MacConfig& mac, const std::string& section_name);
     bool processInterfaceConfig(const InterfaceRuleConfig& interface, const std::string& section_name);
+    bool processActionConfig(const Action& action, const std::string& section_name);
 
     // Configuration parsing (legacy methods)
     bool parseFilterConfig(const YAML::Node& node);

@@ -71,6 +71,8 @@ struct SectionConfig {
     std::optional<std::vector<PortConfig>> ports;
     std::optional<std::vector<MacConfig>> mac;
     std::optional<std::vector<InterfaceRuleConfig>> interface;
+    // Action field for general catch-all rules (e.g., dropall section)
+    std::optional<Action> action;
 
     bool isValid() const;
     std::string getErrorMessage() const;
@@ -107,6 +109,12 @@ template<>
 struct convert<iptables::Protocol> {
     static Node encode(const iptables::Protocol& protocol);
     static bool decode(const Node& node, iptables::Protocol& protocol);
+};
+
+template<>
+struct convert<iptables::Action> {
+    static Node encode(const iptables::Action& action);
+    static bool decode(const Node& node, iptables::Action& action);
 };
 
 template<>

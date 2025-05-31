@@ -641,12 +641,21 @@ No major changes required to CMakeLists.txt, but may need:
 - [x] Subnet filtering support
 
 #### 4.3.5 New Rule Types
-- [ ] Create `PortForwardRule` class for NAT table rules
-- [ ] Implement port forwarding iptables commands
-- [ ] Support for REDIRECT target
-- [ ] Support for PREROUTING chain
-- [ ] Create `PolicyRule` class for chain policies
-- [ ] Implement policy setting commands (-P)
+- [x] Create `PortForwardRule` class for NAT table rules
+- [x] Implement port forwarding iptables commands
+- [x] Support for REDIRECT target
+- [x] Support for PREROUTING chain
+- [x] Create `PolicyRule` class for chain policies
+- [x] Implement policy setting commands (-P)
+
+**Implementation Details:**
+- **Port Forwarding**: Implemented in existing `TcpRule` and `UdpRule` classes using `forward_port` parameter and `buildPortForwardingCommand()` methods instead of separate `PortForwardRule` class
+- **NAT Table Rules**: Port forwarding functionality uses NAT table PREROUTING chain with REDIRECT target, integrated into TCP/UDP rule classes
+- **REDIRECT Target**: Full support implemented in `TcpRule::buildPortForwardingCommand()` and `UdpRule::buildPortForwardingCommand()` methods
+- **PREROUTING Chain**: Complete support implemented across rule classes and `IptablesManager` for NAT table operations
+- **Policy Management**: Implemented in `IptablesManager` and `RuleManager` classes using `CommandExecutor::setChainPolicy()` instead of separate `PolicyRule` class
+- **Policy Commands**: Full support for `-P` iptables commands through `setChainPolicy()`, `resetPolicies()`, and policy configuration processing
+- **Integration**: All new rule types are fully integrated with YAML configuration processing, rule management, and command execution systems
 
 ### 4.4 Rule Management Enhancement (Phase 3)
 

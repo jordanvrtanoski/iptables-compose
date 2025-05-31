@@ -12,14 +12,19 @@ namespace iptables {
 // Helper function to convert Policy enum to string
 std::string policyToString(Policy policy) {
     switch (policy) {
-        case Policy::Accept:
-            return "ACCEPT";
-        case Policy::Drop:
-            return "DROP";
-        case Policy::Reject:
-            return "REJECT";
-        default:
-            return "ACCEPT"; // Default fallback
+        case Policy::Accept: return "ACCEPT";
+        case Policy::Drop: return "DROP";
+        case Policy::Reject: return "REJECT";
+        default: return "ACCEPT";
+    }
+}
+
+std::string actionToString(Action action) {
+    switch (action) {
+        case Action::Accept: return "ACCEPT";
+        case Action::Drop: return "DROP";
+        case Action::Reject: return "REJECT";
+        default: return "ACCEPT";
     }
 }
 
@@ -163,6 +168,14 @@ bool IptablesManager::loadConfig(const std::filesystem::path& config_path) {
                         std::cerr << "Failed to process interface configuration in section " << section_name << std::endl;
                         return false;
                     }
+                }
+            }
+            
+            // Process general action rules (catch-all rules)
+            if (section.action) {
+                if (!processActionConfig(*section.action, section_name)) {
+                    std::cerr << "Failed to process action configuration in section " << section_name << std::endl;
+                    return false;
                 }
             }
         }
@@ -540,6 +553,37 @@ bool IptablesManager::processInterfaceConfig(const InterfaceRuleConfig& interfac
         return false;
     }
     
+    return true;
+}
+
+bool IptablesManager::processActionConfig(const Action& action, const std::string& section_name) {
+    std::cout << "Processing action configuration for section: " << section_name << std::endl;
+    std::cout << "  Action: " << actionToString(action) << std::endl;
+    
+    // Generate rule comment for this catch-all rule
+    std::string comment = "YAML:" + section_name + ":action:" + actionToString(action) + ":i:any:o:any:mac:any";
+    
+    // Remove existing rules with this signature
+    removeRulesBySignature("filter", "INPUT", comment);
+    
+    // Build iptables command for the catch-all rule in INPUT chain
+    std::vector<std::string> args = {"-A", "INPUT"};
+    
+    // Add comment
+    args.insert(args.end(), {
+        "-m", "comment",
+        "--comment", comment,
+        "-j", actionToString(action)
+    });
+    
+    auto result = CommandExecutor::executeIptables(args);
+    if (!result.isSuccess()) {
+        std::cerr << "Failed to add action rule for section " << section_name 
+                 << ": " << result.getErrorMessage() << std::endl;
+        return false;
+    }
+    
+    std::cout << "Successfully added action rule: " << actionToString(action) << " for section " << section_name << std::endl;
     return true;
 }
 
