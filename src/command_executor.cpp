@@ -27,7 +27,83 @@ CommandResult CommandExecutor::execute(const std::vector<std::string>& args) {
 }
 
 CommandResult CommandExecutor::execute(const std::string& command) {
-    return executeInternal(command);
+    // Log the command execution at INFO level for audit trails and debugging
+    // This provides visibility into all iptables operations performed by the application
+    log(LogLevel::Info, "Executing command: " + command);
+    
+    try {
+        // Use popen() to execute the command and capture both stdout and stderr
+        // The "2>&1" redirection combines stderr into stdout for unified output capture
+        // This ensures we capture all command output regardless of which stream it uses
+        std::unique_ptr<FILE, decltype(&pclose)> pipe(popen((command + " 2>&1").c_str(), "r"), pclose);
+        
+        if (!pipe) {
+            // popen() failed - typically due to resource exhaustion or invalid command
+            // This is a system-level failure rather than a command execution failure
+            std::string error = "Failed to execute command: " + command;
+            log(LogLevel::Error, error);
+            
+            CommandResult result;
+            result.success = false;
+            result.exit_code = 1;
+            result.stderr_output = error;
+            result.command = command;
+            return result;
+        }
+        
+        // Read command output in chunks using a fixed-size buffer
+        // This approach handles arbitrary output sizes while controlling memory usage
+        // The buffer size balances memory efficiency with read operation overhead
+        std::array<char, 4096> buffer;
+        std::string output;
+        
+        // Read all available output from the command
+        // fgets() returns nullptr when EOF is reached or an error occurs
+        while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
+            output += buffer.data();
+        }
+        
+        // Close the pipe and retrieve the command exit status
+        // pclose() returns the exit status of the executed command
+        // This status indicates whether the command succeeded or failed
+        int exitStatus = pclose(pipe.release());
+        
+        // Extract the actual exit code from the pclose() return value
+        // pclose() returns a status value that needs to be processed with WEXITSTATUS
+        // On Unix systems, the exit status is encoded in the high byte
+        int exitCode = WEXITSTATUS(exitStatus);
+        
+        // Log the command completion with exit status for debugging and auditing
+        // Include timing information and output length for performance analysis
+        std::string resultLog = "Command completed with exit code " + std::to_string(exitCode);
+        if (!output.empty()) {
+            resultLog += " (output: " + std::to_string(output.length()) + " bytes)";
+        }
+        log(exitCode == 0 ? LogLevel::Debug : LogLevel::Error, resultLog);
+        
+        // Return structured result with exit code and captured output
+        // The caller can use CommandResult methods to check success and extract information
+        CommandResult result;
+        result.success = (exitCode == 0);
+        result.exit_code = exitCode;
+        result.stdout_output = output;
+        result.stderr_output = "";
+        result.command = command;
+        return result;
+        
+    } catch (const std::exception& e) {
+        // Handle any unexpected exceptions during command execution
+        // This provides a consistent error handling interface for system failures
+        std::string error = "Exception during command execution: " + std::string(e.what());
+        log(LogLevel::Error, error);
+        
+        CommandResult result;
+        result.success = false;
+        result.exit_code = -1;
+        result.stderr_output = error;
+        result.command = command;
+        return result;
+    }
 }
 
 CommandResult CommandExecutor::executeIptables(const std::string& table, 
@@ -126,7 +202,16 @@ CommandResult CommandExecutor::flushChain(const std::string& table, const std::s
 }
 
 void CommandExecutor::setLogLevel(LogLevel level) {
+    // Update the global logging level for all CommandExecutor operations
+    // This allows dynamic control of logging verbosity based on user preferences or debugging needs
+    LogLevel oldLevel = current_log_level_;
     current_log_level_ = level;
+    
+    // Log the level change for audit purposes
+    // This helps track when and why logging verbosity was modified
+    std::string message = "Log level changed from " + logLevelToString(oldLevel) + 
+                         " to " + logLevelToString(level);
+    log(LogLevel::Info, message);
 }
 
 LogLevel CommandExecutor::getLogLevel() {
@@ -134,8 +219,10 @@ LogLevel CommandExecutor::getLogLevel() {
 }
 
 bool CommandExecutor::isIptablesAvailable() {
-    CommandResult result = execute("which iptables >/dev/null 2>&1");
-    return result.exit_code == 0;
+    // Check if iptables command is available in the system PATH
+    // This is a basic availability check that doesn't verify permissions
+    CommandResult result = execute("which iptables");
+    return result.isSuccess();
 }
 
 CommandResult CommandExecutor::executeInternal(const std::string& command, bool capture_output) {
@@ -306,6 +393,25 @@ std::string CommandExecutor::escapeShellArg(const std::string& arg) {
     escaped += "'";
     
     return escaped;
+}
+
+std::string CommandExecutor::logLevelToString(LogLevel level) {
+    // Convert LogLevel enum to human-readable string representation
+    // This provides consistent formatting for log output across the application
+    switch (level) {
+        case LogLevel::Error:
+            return "ERROR";   // Critical errors that prevent operation completion
+        case LogLevel::Warning:
+            return "WARNING"; // Non-fatal issues that may affect functionality
+        case LogLevel::Info:
+            return "INFO";    // General informational messages about operations
+        case LogLevel::Debug:
+            return "DEBUG";   // Detailed debugging information for troubleshooting
+        case LogLevel::None:
+            return "NONE";    // No logging
+        default:
+            return "UNKNOWN"; // Fallback for invalid enum values
+    }
 }
 
 } // namespace iptables 

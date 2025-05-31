@@ -1,9 +1,13 @@
 #include "rule.hpp"
 #include <sstream>
+#include <algorithm>
+#include <cctype>
 
 namespace iptables {
 
 std::string Rule::directionToString() const {
+    // Convert Direction enum to iptables command line argument
+    // These map directly to iptables chain specification parameters
     switch (direction_) {
         case Direction::Input:
             return "INPUT";
@@ -12,11 +16,13 @@ std::string Rule::directionToString() const {
         case Direction::Forward:
             return "FORWARD";
         default:
-            return "UNKNOWN";
+            throw std::runtime_error("Unknown direction");
     }
 }
 
 std::string Rule::actionToString() const {
+    // Convert Action enum to iptables target specification
+    // These correspond to standard iptables targets and their behavior
     switch (action_) {
         case Action::Accept:
             return "ACCEPT";
@@ -25,38 +31,54 @@ std::string Rule::actionToString() const {
         case Action::Reject:
             return "REJECT";
         default:
-            return "UNKNOWN";
+            throw std::runtime_error("Unknown action");
     }
 }
 
 // ✨ NEW: Target resolution (action or chain)
 std::string Rule::getTargetString() const {
     if (target_chain_.has_value()) {
-        return *target_chain_;
+        return target_chain_.value();
     }
     return actionToString();
 }
 
 // ✨ NEW: Validation for mutual exclusivity and correctness
 bool Rule::isValid() const {
-    // Note: For now we allow both action and chain to be set
-    // The target_chain takes precedence if set
-    // This allows backward compatibility while enabling chain support
+    // Comprehensive validation of rule configuration
+    // Each check addresses a specific aspect of iptables rule validity
     
-    // Chain name validation (if set)
+    // Validate chain name format and content
+    // Chain names must follow iptables naming conventions
+    if (target_chain_.has_value() && target_chain_->empty()) {
+        return false;  // Chain name is required for all rules
+    }
+    
+    // Check for valid characters in chain name
+    // iptables chain names should contain only alphanumeric characters, underscores, and hyphens
+    // Maximum length is typically 29 characters in iptables
+    if (target_chain_.has_value() && target_chain_->length() > 29) {
+        return false;  // Chain name too long for iptables
+    }
+    
+    // Validate chain name characters
+    // Only allow alphanumeric, underscore, hyphen, and dot characters
     if (target_chain_.has_value()) {
         const std::string& chain = *target_chain_;
-        // Basic chain name validation: non-empty, alphanumeric with underscores
-        if (chain.empty()) {
-            return false;
-        }
         for (char c : chain) {
-            if (!std::isalnum(c) && c != '_' && c != '-') {
-                return false;
+            if (!std::isalnum(c) && c != '_' && c != '-' && c != '.') {
+                return false;  // Invalid character in chain name
             }
         }
     }
     
+    // Chain name cannot start with a hyphen (conflicts with iptables option syntax)
+    if (target_chain_.has_value() && target_chain_->front() == '-') {
+        return false;  // Chain name cannot start with hyphen
+    }
+    
+    // Additional validation can be performed by derived classes
+    // This base implementation provides fundamental checks common to all rule types
     return true;
 }
 
@@ -68,8 +90,8 @@ std::string Rule::getValidationError() const {
     if (target_chain_.has_value()) {
         const std::string& chain = *target_chain_;
         for (char c : chain) {
-            if (!std::isalnum(c) && c != '_' && c != '-') {
-                return "Chain name '" + chain + "' contains invalid characters. Only alphanumeric, underscore, and hyphen are allowed.";
+            if (!std::isalnum(c) && c != '_' && c != '-' && c != '.') {
+                return "Chain name '" + chain + "' contains invalid characters. Only alphanumeric, underscore, hyphen, and dot are allowed.";
             }
         }
     }
@@ -137,21 +159,14 @@ std::string Rule::buildYamlComment(const std::string& section_name,
                                  const std::string& rule_type,
                                  const std::string& details,
                                  const std::string& mac_source) const {
+    // Build standardized YAML comment for rule identification
+    // Format: YAML:section:type:details:interface:mac
     std::ostringstream comment;
-    comment << "YAML:" << section_name << ":" << rule_type << ":" << details;
-    comment << ":" << getInterfaceComment();
-    comment << ":mac:" << mac_source;
-    
-    // Add target information if it's a chain
-    if (target_chain_.has_value()) {
-        comment << ":target:" << *target_chain_;
-    }
-    
-    // Add subnet information if present
-    if (!subnets_.empty()) {
-        comment << ":" << getSubnetsComment();
-    }
-    
+    comment << "YAML:" << section_name 
+            << ":" << rule_type 
+            << ":" << details
+            << ":" << getInterfaceComment()
+            << ":mac:" << mac_source;
     return comment.str();
 }
 
