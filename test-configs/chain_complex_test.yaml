@@ -49,10 +49,8 @@ ssh_security_chain:
         admin_access:
           ports:
             - port: 22
-              subnet: ["192.168.1.0/24"]
+              subnet: ["172.0.0.0/8"]
               allow: true
-        public_access:
-          ports:
             - port: 22
               subnet: ["0.0.0.0/0"]
               allow: false

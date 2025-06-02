@@ -306,22 +306,39 @@ bool ChainManager::cleanupChains() {
 
 void ChainManager::buildDependencyGraph(const Config& config, 
                                        std::map<std::string, std::set<std::string>>& graph) {
+    // Build mapping from section names to actual chain names
+    std::map<std::string, std::string> section_to_chain_map;
+    
     // Initialize graph with all defined chains from chain_definitions
-    for (const auto& [chain_name, chain_config] : config.chain_definitions) {
+    for (const auto& [section_name, chain_config] : config.chain_definitions) {
         for (const auto& chain_rule : chain_config.chain) {
             graph[chain_rule.name] = std::set<std::string>();
+            section_to_chain_map[section_name] = chain_rule.name;  // Map section name to chain name
         }
     }
     
     // Add dependencies - check chain references within each chain's rules
-    for (const auto& [chain_name, chain_config] : config.chain_definitions) {
+    for (const auto& [section_name, chain_config] : config.chain_definitions) {
         for (const auto& chain_rule : chain_config.chain) {
             // Check for chain references within this chain's rules
             std::set<std::string> dependencies;
             for (const auto& [rule_name, rule_config] : chain_rule.rules) {
                 extractChainReferences(rule_config, dependencies);
             }
-            graph[chain_rule.name] = dependencies;
+            
+            // Map section names to actual chain names in dependencies
+            std::set<std::string> mapped_dependencies;
+            for (const std::string& dep : dependencies) {
+                // Check if this is a section name that maps to a chain
+                auto it = section_to_chain_map.find(dep);
+                if (it != section_to_chain_map.end()) {
+                    mapped_dependencies.insert(it->second);  // Use actual chain name
+                } else {
+                    mapped_dependencies.insert(dep);  // Use as-is (might be direct chain name)
+                }
+            }
+            
+            graph[chain_rule.name] = mapped_dependencies;
         }
     }
 }

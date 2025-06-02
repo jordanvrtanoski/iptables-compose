@@ -149,12 +149,27 @@ bool IptablesManager::loadConfig(const std::filesystem::path& config_path) {
         }
         std::cout << "Chain configurations processed successfully" << std::endl;
         
+        // Build section name to chain name mapping for resolving references
+        section_to_chain_map_.clear();
+        for (const auto& [section_name, chain_config] : config.chain_definitions) {
+            for (const auto& chain_rule : chain_config.chain) {
+                section_to_chain_map_[section_name] = chain_rule.name;
+                break; // Use the first (and typically only) chain in the section
+            }
+        }
+        
         // ✨ NEW: Process chain rules (populate chains with rules) - Phase 6.3.4
         std::cout << "Processing chain rules..." << std::endl;
-        for (const auto& [chain_name, chain_config] : config.chain_definitions) {
-            if (!processChainConfig(chain_name, chain_config)) {
-                std::cerr << "Failed to process chain rules for: " << chain_name << std::endl;
-                return false;
+        for (const auto& [yaml_object_name, chain_config] : config.chain_definitions) {
+            // Process each chain rule in the configuration
+            for (const auto& chain_rule : chain_config.chain) {
+                std::cout << "Processing chain configuration: " << yaml_object_name << std::endl;
+                
+                // Use the actual chain name from the ChainRuleConfig.name field
+                if (!processChainRuleConfig(chain_rule.name, chain_rule)) {
+                    std::cerr << "Failed to process chain rules for: " << chain_rule.name << std::endl;
+                    return false;
+                }
             }
         }
         std::cout << "Chain rules processed successfully" << std::endl;
@@ -399,6 +414,21 @@ bool IptablesManager::processPortConfig(const PortConfig& port, const std::strin
     } else {
         // Handle regular rules in the specified chain
         std::string comment = "YAML:" + section_name + ":port:" + port_description + ":" + iface_comment + ":mac:" + mac_comment;
+        
+        // Add subnet information to make rules unique
+        if (port.subnet && !port.subnet->empty()) {
+            comment += ":subnet:";
+            for (size_t i = 0; i < port.subnet->size(); ++i) {
+                if (i > 0) comment += ",";
+                comment += (*port.subnet)[i];
+            }
+        } else {
+            comment += ":subnet:any";
+        }
+        
+        // Add action to make rules unique
+        comment += ":";
+        comment += (port.allow ? "ACCEPT" : "DROP");
         
         // ✨ NEW: Handle chain targets
         if (port.chain) {
@@ -699,9 +729,13 @@ bool IptablesManager::processInterfaceChainCall(const InterfaceConfig& interface
         return false;
     }
     
+    // Resolve the target chain name (may be a section name that needs to be resolved to actual chain name)
+    std::string target_chain_ref = *interface.chain;
+    std::string target_chain = resolveChainName(target_chain_ref);
+    
     // Generate rule comment for interface chain call
     std::string iface_comment = "i:" + interface.input.value_or("any") + ":o:" + interface.output.value_or("any");
-    std::string comment = "YAML:" + section_name + ":chain_call:" + *interface.chain + ":" + iface_comment;
+    std::string comment = "YAML:" + section_name + ":chain_call:" + target_chain + ":" + iface_comment;
     
     // Determine which chain to add the rule to based on interface specification
     std::string chain = "INPUT"; // Default to INPUT for interface-based chain calls
@@ -727,11 +761,11 @@ bool IptablesManager::processInterfaceChainCall(const InterfaceConfig& interface
         args.push_back(*interface.output);
     }
     
-    // Jump to target chain
+    // Add comment and target chain
     args.insert(args.end(), {
         "-m", "comment",
         "--comment", comment,
-        "-j", *interface.chain
+        "-j", target_chain
     });
     
     auto result = CommandExecutor::executeIptables(args);
@@ -740,8 +774,19 @@ bool IptablesManager::processInterfaceChainCall(const InterfaceConfig& interface
         return false;
     }
     
-    std::cout << "Successfully added interface chain call to " << *interface.chain << " in " << chain << " chain" << std::endl;
+    std::cout << "Successfully added interface chain call to " << target_chain << " in " << chain << " chain" << std::endl;
     return true;
+}
+
+// Helper function to resolve chain names from section names to actual chain names
+std::string IptablesManager::resolveChainName(const std::string& name) {
+    // Check if this is a section name that maps to an actual chain name
+    auto it = section_to_chain_map_.find(name);
+    if (it != section_to_chain_map_.end()) {
+        return it->second; // Return the actual chain name
+    }
+    // If not found in mapping, assume it's already an actual chain name
+    return name;
 }
 
 bool IptablesManager::resetRules() {
@@ -1006,13 +1051,16 @@ bool IptablesManager::processChainConfig(const std::string& chain_name, const Ch
         return false;
     }
     
-    // Process each chain rule in the configuration
+    // Find the specific chain rule that matches the chain name
     for (const auto& chain_rule : chain_config.chain) {
-        std::cout << "Processing chain rule: " << chain_rule.name << " in chain " << chain_name << std::endl;
-        
-        if (!processChainRuleConfig(chain_name, chain_rule)) {
-            std::cerr << "Failed to process chain rule: " << chain_rule.name << std::endl;
-            return false;
+        if (chain_rule.name == chain_name) {
+            std::cout << "Processing chain rule: " << chain_rule.name << " in chain " << chain_name << std::endl;
+            
+            if (!processChainRuleConfig(chain_name, chain_rule)) {
+                std::cerr << "Failed to process chain rule: " << chain_rule.name << std::endl;
+                return false;
+            }
+            break; // Found and processed the matching chain rule
         }
     }
     
@@ -1030,10 +1078,10 @@ bool IptablesManager::processChainRuleConfig(const std::string& chain_name, cons
     return true;
 }
 
-bool IptablesManager::processChainRules(const std::string& chain_name, const std::map<std::string, SectionConfig>& rules) {
+bool IptablesManager::processChainRules(const std::string& chain_name, const std::vector<std::pair<std::string, SectionConfig>>& rules) {
     std::cout << "Processing " << rules.size() << " rule groups in chain: " << chain_name << std::endl;
     
-    // Process each rule group within the chain
+    // Process each rule group within the chain in YAML order
     for (const auto& [rule_group_name, section_config] : rules) {
         std::cout << "Processing rule group: " << rule_group_name << " in chain " << chain_name << std::endl;
         
@@ -1053,6 +1101,21 @@ bool IptablesManager::processChainRules(const std::string& chain_name, const std
                     }
                 }
                 comment += ":" + getInterfaceComment(port.interface);
+                
+                // Add subnet information to make rules unique
+                if (port.subnet && !port.subnet->empty()) {
+                    comment += ":subnet:";
+                    for (size_t i = 0; i < port.subnet->size(); ++i) {
+                        if (i > 0) comment += ",";
+                        comment += (*port.subnet)[i];
+                    }
+                } else {
+                    comment += ":subnet:any";
+                }
+                
+                // Add action to make rules unique
+                comment += ":";
+                comment += (port.allow ? "ACCEPT" : "DROP");
                 
                 // Remove existing rules with this signature in the chain
                 removeRulesBySignature("filter", chain_name, comment);
@@ -1181,7 +1244,10 @@ bool IptablesManager::processChainRules(const std::string& chain_name, const std
         
         // Process interface chain calls within the chain
         if (section_config.interface_config && section_config.interface_config->chain) {
-            std::string target_chain = *section_config.interface_config->chain;
+            std::string target_chain_ref = *section_config.interface_config->chain;
+            
+            // Resolve the target chain name (may be a section name that needs to be resolved to actual chain name)
+            std::string target_chain = resolveChainName(target_chain_ref);
             
             // Generate rule comment for chain call
             std::string comment = "YAML:chain:" + chain_name + ":chain_call:" + target_chain + ":" + getInterfaceComment(section_config.interface_config);

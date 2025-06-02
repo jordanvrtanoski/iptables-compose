@@ -216,7 +216,7 @@ struct InterfaceRuleConfig {
 struct ChainRuleConfig {
     std::string name;  ///< Chain name (e.g., "MAC_RULES_ETH1")
     Action action = Action::Accept;  ///< Default action for the chain
-    std::map<std::string, SectionConfig> rules;  ///< Named rule groups within chain
+    std::vector<std::pair<std::string, SectionConfig>> rules;  ///< Named rule groups within chain (preserves YAML order)
 
     /**
      * @brief Validate the chain rule configuration

@@ -693,7 +693,12 @@ YAML::Node convert<ChainRuleConfig>::encode(const ChainRuleConfig& config) {
         node["action"] = config.action;
     }
     if (!config.rules.empty()) {
-        node["rules"] = config.rules;
+        Node rules_node;
+        // Preserve order by encoding each rule in sequence
+        for (const auto& [rule_name, rule_config] : config.rules) {
+            rules_node[rule_name] = rule_config;
+        }
+        node["rules"] = rules_node;
     }
     
     return node;
@@ -712,7 +717,16 @@ bool convert<ChainRuleConfig>::decode(const Node& node, ChainRuleConfig& config)
     }
     
     if (node["rules"]) {
-        config.rules = node["rules"].as<std::map<std::string, SectionConfig>>();
+        // Parse rules while preserving YAML order
+        config.rules.clear();
+        const Node& rules_node = node["rules"];
+        
+        // Iterate through rules in YAML order
+        for (const auto& rule_item : rules_node) {
+            std::string rule_name = rule_item.first.as<std::string>();
+            SectionConfig rule_config = rule_item.second.as<SectionConfig>();
+            config.rules.emplace_back(rule_name, std::move(rule_config));
+        }
     }
     
     return true;

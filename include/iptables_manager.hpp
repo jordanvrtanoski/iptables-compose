@@ -159,6 +159,9 @@ private:
     RuleManager rule_manager_;      ///< Manages individual iptables rules
     CommandExecutor command_executor_;  ///< Executes low-level iptables commands
     ChainManager chain_manager_;    ///< Manages custom chain operations
+    
+    // Section name to actual chain name mapping for resolving references
+    std::map<std::string, std::string> section_to_chain_map_;
 
     // Configuration processing
     
@@ -270,7 +273,7 @@ private:
      * Processes all rule sections within a custom chain, maintaining
      * proper rule ordering and section organization.
      */
-    bool processChainRules(const std::string& chain_name, const std::map<std::string, SectionConfig>& rules);
+    bool processChainRules(const std::string& chain_name, const std::vector<std::pair<std::string, SectionConfig>>& rules);
 
     // Configuration parsing (legacy methods)
     
@@ -354,6 +357,16 @@ private:
      * simple string values and complex interface specifications.
      */
     InterfaceConfig parseInterface(const YAML::Node& node);
+    
+    /**
+     * @brief Resolve chain name from section name to actual chain name
+     * @param name Section name or chain name to resolve
+     * @return Actual chain name for iptables rules
+     * 
+     * Resolves section names to actual chain names using the internal mapping.
+     * If the name is not found in the mapping, it's assumed to be an actual chain name.
+     */
+    std::string resolveChainName(const std::string& name);
 };
 
 } // namespace iptables 
